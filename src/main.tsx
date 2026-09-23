@@ -1,13 +1,28 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
-import { requestPersistentStorage } from './db/db'
+import App from './App'
+import { getConfig, requestPersistentStorage } from './db/db'
+import { ensureSeed } from './db/seed'
+import { setRolloverHour } from './core/time'
+import { initTheme } from './app/theme'
 
-requestPersistentStorage()
+initTheme()
+const root = createRoot(document.getElementById('root')!)
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+async function boot() {
+  try {
+    await ensureSeed()
+    setRolloverHour(await getConfig('rolloverHour', 4))
+    void requestPersistentStorage()
+    root.render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+  } catch (e) {
+    root.render(<div style={{ padding: 24 }}>Не удалось открыть базу данных: {String(e)}</div>)
+  }
+}
+
+void boot()

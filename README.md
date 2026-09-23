@@ -1,32 +1,26 @@
-# React + TypeScript + Vite
+# AnkiCards
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Веб-приложение (PWA) для изучения иностранных слов по карточкам с интервальными повторениями — аналог AnkiDroid.
+Работает в браузере и офлайн, ставится на экран «Домой» iPhone. Данные хранятся только на устройстве (IndexedDB).
 
-Currently, two official plugins are available:
+Сайт: https://sassy69691337.github.io/ankicards/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Разработка
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev      # локальный сервер
+npm test         # юнит-тесты (планировщик, шаблоны)
+npm run build    # сборка в dist/
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Каждый пуш в `main` автоматически публикуется на GitHub Pages (`.github/workflows/deploy.yml`).
+
+## Структура
+
+- `src/core` — планировщик (SM-2 в стиле Anki), шаблоны карточек и пропуски, время, TTS, медиа
+- `src/db` — схема IndexedDB (Dexie), операции над колодами, заметками и карточками
+- `src/features` — экраны: колоды, учёба, редактор, поиск, настройки
+- `src/ui` — общие компоненты интерфейса
+
+План работ — в [PLAN.md](PLAN.md).
