@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Ellipsis, FolderPlus, List, PartyPopper, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Download, Ellipsis, FileUp, FolderPlus, List, PartyPopper, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { db } from '../../db/db'
 import { deckInfo, deleteDeck, leafName, renameDeck } from '../../db/collection'
 import { cardsWord, errMsg, formatInterval } from '../../core/format'
@@ -12,6 +12,7 @@ import { ActionSheet } from '../../ui/Sheet'
 import { confirmDialog, promptDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
 import { askNewDeck } from './DecksPage'
+import { ExportSheet } from './ExportSheet'
 
 export default function DeckPage() {
   const id = Number(useParams().id)
@@ -19,6 +20,7 @@ export default function DeckPage() {
   const deck = useLiveQuery(() => db.decks.get(id).then((d) => d ?? null), [id])
   const info = useLiveQuery(() => deckInfo(id), [id])
   const [menu, setMenu] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   if (deck === null) {
     return (
@@ -78,12 +80,18 @@ export default function DeckPage() {
           <EmptyState
             icon={<Plus />}
             title="В колоде пока пусто"
-            text="Добавьте первые слова — и можно начинать учить."
+            text="Добавьте первые слова или импортируйте файл."
             action={
-              <Button onClick={() => nav(`/add?deck=${id}`)}>
-                <Plus className="size-5" />
-                Добавить карточку
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button onClick={() => nav(`/add?deck=${id}`)}>
+                  <Plus className="size-5" />
+                  Добавить
+                </Button>
+                <Button variant="secondary" onClick={() => nav(`/import?deck=${id}`)}>
+                  <FileUp className="size-5" />
+                  Импорт
+                </Button>
+              </div>
             }
           />
         ) : (
@@ -146,11 +154,14 @@ export default function DeckPage() {
         title={leafName(deck.name)}
         actions={[
           { label: 'Настройки колоды', icon: <SlidersHorizontal />, onSelect: () => nav(`/deck/${id}/options`) },
+          { label: 'Импорт в эту колоду', icon: <FileUp />, onSelect: () => nav(`/import?deck=${id}`) },
+          { label: 'Экспорт колоды', icon: <Download />, onSelect: () => setExporting(true) },
           { label: 'Создать подколоду', icon: <FolderPlus />, onSelect: () => void askNewDeck(deck.name) },
           { label: 'Переименовать', icon: <Pencil />, onSelect: () => void onRename() },
           { label: 'Удалить колоду', icon: <Trash2 />, danger: true, onSelect: () => void onDelete() },
         ]}
       />
+      <ExportSheet open={exporting} onClose={() => setExporting(false)} deckId={id} deckName={deck.name} />
     </>
   )
 }

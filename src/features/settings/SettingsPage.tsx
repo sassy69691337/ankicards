@@ -9,6 +9,7 @@ import { ListGroup, ListRow } from '../../ui/List'
 import { FormRow, Segmented, Select } from '../../ui/forms'
 import { Button } from '../../ui/Button'
 import { toast } from '../../ui/toast'
+import { BackupSection } from './BackupSection'
 
 function formatBytes(n: number) {
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} КБ`
@@ -76,9 +77,11 @@ export default function SettingsPage() {
           </FormRow>
         </ListGroup>
 
+        <BackupSection />
+
         <ListGroup
           title="Данные"
-          footer="Все данные хранятся только на этом устройстве, в браузере. Экспорт и резервные копии появятся в следующем обновлении."
+          footer="Все данные хранятся только на этом устройстве, в браузере. Регулярно делайте резервную копию."
         >
           <ListRow label="Заметок" value={stats?.notes ?? '…'} />
           <ListRow label="Карточек" value={stats?.cards ?? '…'} />

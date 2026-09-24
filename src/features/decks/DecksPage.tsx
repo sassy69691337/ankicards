@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronRight, FolderPlus, Layers, Plus } from 'lucide-react'
+import { ChevronRight, DatabaseBackup, FileUp, FolderPlus, Layers, Plus } from 'lucide-react'
+import { getConfig } from '../../db/db'
 import { createDeck, deckTree, todayStats, type DeckNode } from '../../db/collection'
 import { cardsWord, errMsg } from '../../core/format'
 import { PageBody, PageHeader } from '../../ui/PageHeader'
@@ -48,6 +49,7 @@ export async function askNewDeck(parent?: string): Promise<number | null> {
 export default function DecksPage() {
   const tree = useLiveQuery(deckTree, [])
   const stats = useLiveQuery(todayStats, [])
+  const lastBackup = useLiveQuery(() => getConfig<number | null>('lastBackupAt', null), [])
   const [collapsed, setCollapsed] = useState(loadCollapsed)
   const nav = useNavigate()
 
@@ -71,6 +73,7 @@ export default function DecksPage() {
   const rows = tree ? flatten(tree, collapsed) : []
   const due = tree?.reduce((s, n) => s + n.counts.new + n.counts.learn + n.counts.review, 0) ?? 0
   const totalCards = tree?.reduce((s, n) => s + n.total, 0) ?? 0
+  const needBackup = totalCards >= 20 && lastBackup !== undefined && (!lastBackup || Date.now() - lastBackup > 7 * 86_400_000)
 
   return (
     <>
@@ -78,9 +81,14 @@ export default function DecksPage() {
         large
         title="Колоды"
         actions={
-          <IconButton label="Новая колода" onClick={onCreate}>
-            <FolderPlus />
-          </IconButton>
+          <>
+            <IconButton label="Импорт" onClick={() => nav('/import')}>
+              <FileUp />
+            </IconButton>
+            <IconButton label="Новая колода" onClick={onCreate}>
+              <FolderPlus />
+            </IconButton>
+          </>
         }
       />
       <PageBody>
@@ -97,19 +105,35 @@ export default function DecksPage() {
           </p>
         </section>
 
+        {needBackup && (
+          <button
+            type="button"
+            onClick={() => nav('/settings')}
+            className="flex w-full items-center gap-3 rounded-2xl bg-amber-500/10 px-4 py-3 text-left text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+          >
+            <DatabaseBackup className="size-5 shrink-0" />
+            <span className="flex-1 text-sm">
+              <span className="block font-semibold">Сделайте резервную копию</span>
+              <span className="opacity-80">{lastBackup ? 'Последней копии больше недели.' : 'Карточки хранятся только на этом устройстве.'}</span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 opacity-60" />
+          </button>
+        )}
+
         {tree && totalCards === 0 && rows.length <= 1 ? (
           <EmptyState
             icon={<Layers />}
             title="Пока нет карточек"
-            text="Создайте колоду и добавьте первые слова. Импорт CSV и APKG появится в следующем обновлении."
+            text="Добавьте первые слова вручную или импортируйте CSV, TXT или колоду Anki (.apkg)."
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <Button onClick={() => nav('/add')}>
                   <Plus className="size-5" />
                   Добавить карточку
                 </Button>
-                <Button variant="secondary" onClick={onCreate}>
-                  Новая колода
+                <Button variant="secondary" onClick={() => nav('/import')}>
+                  <FileUp className="size-5" />
+                  Импорт файла
                 </Button>
               </div>
             }

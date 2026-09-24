@@ -70,6 +70,8 @@ export interface NoteType {
   templates: CardTemplate[]
   css: string
   createdAt: number
+  /** id типа в Anki, если импортирован из APKG */
+  ankiId?: number
 }
 
 export interface Note {

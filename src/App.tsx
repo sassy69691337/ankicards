@@ -8,6 +8,7 @@ import AddNotePage from './features/editor/AddNotePage'
 import EditNotePage from './features/editor/EditNotePage'
 import BrowsePage from './features/browser/BrowsePage'
 import SettingsPage from './features/settings/SettingsPage'
+import ImportPage from './features/import/ImportPage'
 import { DialogHost } from './ui/dialogs'
 import { ToastHost } from './ui/toast'
 
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="browse" element={<BrowsePage />} />
           <Route path="note/:id" element={<EditNotePage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="import" element={<ImportPage />} />
         </Route>
         <Route path="deck/:id/study" element={<StudyPage />} />
       </Routes>

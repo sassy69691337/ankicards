@@ -8,6 +8,7 @@ const base = process.env.BASE_PATH ?? '/'
 
 export default defineConfig({
   base,
+  build: { chunkSizeWarningLimit: 800 },
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toLocaleDateString('ru-RU')),
   },
@@ -16,6 +17,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,wasm,webmanifest}'],
+      },
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'AnkiCards',

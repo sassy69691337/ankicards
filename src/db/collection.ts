@@ -402,13 +402,13 @@ export async function forgetCards(ids: number[]): Promise<void> {
 
 // ---------- Заметки ----------
 
-async function nextPositions(n: number): Promise<number> {
+export async function nextPositions(n: number): Promise<number> {
   const pos = await getConfig('nextPos', 1)
   await setConfig('nextPos', pos + n)
   return pos
 }
 
-function newGuid(): string {
+export function newGuid(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -418,7 +418,7 @@ export function sortTextOf(fields: string[]): string {
   return plainText(stripCloze(fields[0] ?? '')).toLowerCase()
 }
 
-function blankCard(noteId: number, deckId: number, ord: number, due: number, now: number): Omit<Card, 'id'> {
+export function blankCard(noteId: number, deckId: number, ord: number, due: number, now: number): Omit<Card, 'id'> {
   return {
     noteId, deckId, ord, due, type: CardType.New, queue: Queue.New, ivl: 0, ease: 0, reps: 0, lapses: 0, left: 0,
     flags: 0, createdAt: now, modifiedAt: now,
