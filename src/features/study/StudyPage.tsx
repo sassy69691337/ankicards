@@ -36,6 +36,7 @@ import { confirmDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
 import { cn } from '../../ui/cn'
 import { NoteEditForm } from '../editor/NoteEditForm'
+import { requestSync } from '../../sync/cloud'
 import { CardView } from './CardView'
 
 type State =
@@ -167,6 +168,7 @@ export default function StudyPage() {
       cancelled = true
       stopAudio()
       stopSpeech()
+      void requestSync()
     }
   }, [deckId, loadNext, nav])
 

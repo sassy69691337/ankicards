@@ -11,6 +11,7 @@ import { EmptyState } from '../../ui/List'
 import { promptDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
 import { cn } from '../../ui/cn'
+import { CloudBadge } from '../settings/CloudSection'
 
 const COLLAPSE_KEY = 'decks.collapsed'
 
@@ -82,6 +83,7 @@ export default function DecksPage() {
         title="Колоды"
         actions={
           <>
+            <CloudBadge />
             <IconButton label="Импорт" onClick={() => nav('/import')}>
               <FileUp />
             </IconButton>

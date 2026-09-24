@@ -10,6 +10,7 @@ import { FormRow, Segmented, Select } from '../../ui/forms'
 import { Button } from '../../ui/Button'
 import { toast } from '../../ui/toast'
 import { BackupSection } from './BackupSection'
+import { CloudSection } from './CloudSection'
 
 function formatBytes(n: number) {
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} КБ`
@@ -42,6 +43,8 @@ export default function SettingsPage() {
     <>
       <PageHeader large title="Настройки" />
       <PageBody>
+        <CloudSection />
+
         <ListGroup title="Оформление">
           <div className="px-4 py-3">
             <Segmented<ThemePref>

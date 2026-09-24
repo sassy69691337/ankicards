@@ -10,6 +10,8 @@ class AnkiDb extends Dexie {
   revlog!: EntityTable<RevLog, 'id'>
   media!: EntityTable<MediaFile, 'name'>
   config!: EntityTable<ConfigEntry, 'key'>
+  /** Что уже отправлено в облако: ключ записи -> хеш */
+  syncState!: EntityTable<{ k: string; h: number }, 'k'>
 
   constructor() {
     super('ankicards')
@@ -33,6 +35,7 @@ class AnkiDb extends Dexie {
             d.optionsId ??= 1
           }),
       )
+    this.version(3).stores({ syncState: 'k' })
   }
 }
 

@@ -31,7 +31,9 @@ export async function createBackup(): Promise<{ blob: Blob; notes: number; media
     db.config.toArray(),
     db.media.toArray(),
   ])
-  const data: BackupData = { format: FORMAT, version: 1, createdAt: Date.now(), decks, deckOptions, noteTypes, notes, cards, revlog, config }
+  // Служебные ключи синхронизации относятся к устройству, а не к коллекции
+  const ownConfig = config.filter((c) => !c.key.startsWith('sync.'))
+  const data: BackupData = { format: FORMAT, version: 1, createdAt: Date.now(), decks, deckOptions, noteTypes, notes, cards, revlog, config: ownConfig }
   const files: Zippable = { 'collection.json': [strToU8(JSON.stringify(data)), { level: 6 }] }
   for (const m of media) {
     files[`media/${encodeURIComponent(m.name)}`] = [new Uint8Array(await m.blob.arrayBuffer()), { level: 0 }]
@@ -66,6 +68,7 @@ export function readBackup(bytes: Uint8Array): { data: BackupData; media: Record
 export async function restoreBackup(bytes: Uint8Array): Promise<{ notes: number; cards: number }> {
   const { data, media } = readBackup(bytes)
   await db.transaction('rw', [db.decks, db.deckOptions, db.noteTypes, db.notes, db.cards, db.revlog, db.config, db.media], async () => {
+    const syncKeys = (await db.config.toArray()).filter((c) => c.key.startsWith('sync.'))
     await Promise.all([
       db.decks.clear(),
       db.deckOptions.clear(),
@@ -82,7 +85,7 @@ export async function restoreBackup(bytes: Uint8Array): Promise<{ notes: number;
     await db.notes.bulkAdd(data.notes)
     await db.cards.bulkAdd(data.cards)
     await db.revlog.bulkAdd(data.revlog)
-    await db.config.bulkAdd(data.config)
+    await db.config.bulkPut([...data.config.filter((c) => !c.key.startsWith('sync.')), ...syncKeys])
     await db.media.bulkAdd(
       Object.entries(media).map(([name, content]) => ({ name, blob: new Blob([content as Uint8Array<ArrayBuffer>], { type: mimeOf(name) }) })),
     )

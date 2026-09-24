@@ -20,6 +20,7 @@ import { promptDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
 import { cn } from '../../ui/cn'
 import { DeckOptionsList } from '../editor/DeckSelect'
+import { requestSync } from '../../sync/cloud'
 
 type Step =
   | { kind: 'pick' }
@@ -91,6 +92,7 @@ export default function ImportPage() {
               try {
                 const report = await importTextRows(parsed, plan, progress)
                 setStep({ kind: 'done', report })
+                void requestSync()
               } catch (e) {
                 setStep({ kind: 'error', message: errMsg(e) })
               }
@@ -106,6 +108,7 @@ export default function ImportPage() {
               try {
                 const report = await importApkg(step.data, opts, progress)
                 setStep({ kind: 'done', report })
+                void requestSync()
               } catch (e) {
                 setStep({ kind: 'error', message: errMsg(e) })
               }

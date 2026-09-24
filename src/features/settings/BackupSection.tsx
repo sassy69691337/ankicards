@@ -10,6 +10,7 @@ import { ListGroup, ListRow } from '../../ui/List'
 import { Button } from '../../ui/Button'
 import { confirmDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
+import { requestSync } from '../../sync/cloud'
 
 type State = { kind: 'idle' } | { kind: 'busy'; text: string } | { kind: 'ready'; blob: Blob; name: string }
 
@@ -51,6 +52,7 @@ export function BackupSection() {
       const r = await restoreBackup(new Uint8Array(await file.arrayBuffer()))
       setRolloverHour(await getConfig('rolloverHour', 4))
       toast(`Восстановлено: ${r.cards} ${cardsWord(r.cards)}`)
+      void requestSync()
     } catch (e) {
       toast(errMsg(e), 'error')
     } finally {
