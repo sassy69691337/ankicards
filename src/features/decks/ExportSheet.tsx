@@ -39,7 +39,7 @@ export function ExportSheet({ open, onClose, deckId, deckName }: { open: boolean
     <Sheet open={open} onClose={close} title="Экспорт колоды">
       {ready ? (
         <div className="space-y-4">
-          <p className="text-sm text-muted">
+          <p className="break-all text-[15px] text-muted">
             {ready.name} · {ready.notes} {plural(ready.notes, ['заметка', 'заметки', 'заметок'])} · {formatBytes(ready.blob.size)}
           </p>
           <Button
@@ -61,12 +61,12 @@ export function ExportSheet({ open, onClose, deckId, deckName }: { open: boolean
               type="button"
               disabled={busy}
               onClick={() => void build(kind, ext)}
-              className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-surface-2 disabled:opacity-50"
+              className="flex min-h-14 w-full items-start gap-3 rounded-[16px] px-3 py-3 text-left transition hover:bg-surface-2 disabled:opacity-50"
             >
-              <Icon className="mt-0.5 size-5 shrink-0 text-accent" />
+              <Icon className="mt-0.5 size-5 shrink-0 text-accent-text" />
               <span>
-                <span className="block text-[15px] font-medium">{title}</span>
-                <span className="block text-sm text-muted">{text}</span>
+                <span className="block text-base font-medium">{title}</span>
+                <span className="block text-[15px] leading-[22px] text-muted">{text}</span>
               </span>
             </button>
           ))}

@@ -3,30 +3,17 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Pause, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { db } from '../../db/db'
 import { deleteNote, forgetCards, moveNoteCards, restoreCards, suspendCards } from '../../db/collection'
-import { CardType, Queue, type Card, type NoteType } from '../../db/types'
-import { schedTime } from '../../core/time'
-import { formatDay } from '../../core/format'
+import { CardType, Queue } from '../../db/types'
+import { cardsWord } from '../../core/format'
 import { PageBody, PageHeader } from '../../ui/PageHeader'
 import { Field, Select } from '../../ui/forms'
-import { Button } from '../../ui/Button'
-import { ListGroup } from '../../ui/List'
+import { Button, IconButton } from '../../ui/Button'
+import { ListGroup, StatusBadge } from '../../ui/List'
 import { confirmDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
-import { cn } from '../../ui/cn'
 import { NoteEditForm } from './NoteEditForm'
 import { DeckOptionsList } from './DeckSelect'
-
-export function cardStatus(c: Card): { label: string; cls: string } {
-  if (c.queue === Queue.Suspended) return { label: 'Приостановлена', cls: 'text-muted' }
-  if (c.queue < 0) return { label: 'Отложена', cls: 'text-muted' }
-  if (c.type === CardType.New) return { label: 'Новая', cls: 'text-new' }
-  if (c.queue === Queue.Learn || c.queue === Queue.DayLearn) return { label: 'Изучается', cls: 'text-learn' }
-  const days = c.due - schedTime().today
-  return { label: days <= 0 ? 'Повторить сегодня' : `Повтор ${formatDay(c.due)}`, cls: 'text-review' }
-}
-
-const cardName = (nt: NoteType | undefined, ord: number) =>
-  nt?.kind === 'cloze' ? `Пропуск ${ord + 1}` : (nt?.templates[ord]?.name ?? `Карточка ${ord + 1}`)
+import { cardName, cardStatus } from './cardStatus'
 
 export default function EditNotePage() {
   const id = Number(useParams().id)
@@ -56,9 +43,10 @@ export default function EditNotePage() {
   }
 
   async function onDelete() {
+    const n = data?.cards.length ?? 0
     const ok = await confirmDialog({
       title: 'Удалить заметку?',
-      message: 'Будут удалены все её карточки и прогресс. Это нельзя отменить.',
+      message: `Будут удалены заметка, ${n} ${cardsWord(n)} и их прогресс. Это нельзя отменить.`,
       confirmText: 'Удалить',
       danger: true,
     })
@@ -74,9 +62,9 @@ export default function EditNotePage() {
     <>
       <PageHeader title="Редактирование" back={back} />
       <PageBody>
-        <div className="rounded-3xl border border-line bg-surface p-4">
+        <section className="rounded-[24px] bg-surface p-4 ring-1 ring-line/70 min-[360px]:p-5">
           <NoteEditForm noteId={id} onSaved={() => nav(back)} />
-        </div>
+        </section>
 
         {data && data.cards.length > 0 && (
           <>
@@ -93,44 +81,45 @@ export default function EditNotePage() {
               </Select>
             </Field>
 
-            <ListGroup title="Карточки">
+            <ListGroup
+              title={`Карточки этой заметки: ${data.cards.length}`}
+              footer="Одна заметка порождает карточки для каждого направления. Статус и прогресс у каждой свой."
+            >
               {data.cards.map((c) => {
                 const st = cardStatus(c)
                 const suspended = c.queue === Queue.Suspended
                 return (
-                  <div key={c.id} className="flex items-center gap-3 px-4 py-3">
+                  <div key={c.id} className="flex items-center gap-2 py-2.5 pl-4 pr-2">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[15px] font-medium">{cardName(data.nt, c.ord)}</div>
-                      <div className="mt-0.5 text-xs text-muted">
-                        <span className={cn('font-medium', st.cls)}>{st.label}</span>
+                      <div className="text-base font-medium">{cardName(data.nt, c.ord)}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+                        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
                         {c.type !== CardType.New && (
-                          <>
-                            {' '}· лёгкость {Math.round(c.ease / 10)}% · повторов {c.reps} · ошибок {c.lapses}
-                          </>
+                          <span>
+                            лёгкость {Math.round(c.ease / 10)}% · повторов {c.reps} · ошибок {c.lapses}
+                          </span>
                         )}
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={suspended ? 'Возобновить' : 'Приостановить'}
+                    <IconButton
+                      label={suspended ? 'Возобновить карточку' : 'Приостановить карточку'}
                       onClick={() => void (suspended ? restoreCards([c.id]) : suspendCards([c.id]))}
+                      className="text-muted [&_svg]:size-5"
                     >
-                      {suspended ? <Play className="size-4" /> : <Pause className="size-4" />}
-                    </Button>
+                      {suspended ? <Play /> : <Pause />}
+                    </IconButton>
                     {c.type !== CardType.New && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label="Сбросить прогресс"
+                      <IconButton
+                        label="Сбросить прогресс"
+                        className="text-muted [&_svg]:size-5"
                         onClick={async () => {
-                          if (await confirmDialog({ title: 'Сбросить прогресс?', message: 'Карточка снова станет новой.', confirmText: 'Сбросить' })) {
+                          if (await confirmDialog({ title: 'Сбросить прогресс?', message: 'Карточка снова станет новой. Интервалы этой карточки будут потеряны.', confirmText: 'Сбросить', danger: true })) {
                             await forgetCards([c.id])
                           }
                         }}
                       >
-                        <RotateCcw className="size-4" />
-                      </Button>
+                        <RotateCcw />
+                      </IconButton>
                     )}
                   </div>
                 )
@@ -139,8 +128,8 @@ export default function EditNotePage() {
           </>
         )}
 
-        <Button variant="danger" className="w-full" onClick={() => void onDelete()}>
-          <Trash2 className="size-4" />
+        <Button variant="danger" size="lg" className="w-full" onClick={() => void onDelete()}>
+          <Trash2 className="size-5" />
           Удалить заметку
         </Button>
       </PageBody>

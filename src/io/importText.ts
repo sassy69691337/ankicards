@@ -1,5 +1,6 @@
 // Импорт строк CSV/TXT в коллекцию
 import { db } from '../db/db'
+import { NO_REVERSE_FIELD } from '../db/defaults'
 import { blankCard, createDeck, newGuid, nextPositions, sortTextOf } from '../db/collection'
 import type { Card, Note, NoteType } from '../db/types'
 import { cardOrdsForNote } from '../core/template'
@@ -60,6 +61,8 @@ export function suggestPlan(parsed: ParsedText, nt: NoteType, deckId: number, na
       const byName = names.findIndex((n) => n.trim().toLowerCase() === f.toLowerCase())
       if (byName >= 0 && !special.has(byName)) return byName
     }
+    // Поле-флаг обратной карточки заполняется только колонкой с таким же названием
+    if (f === NO_REVERSE_FIELD) return null
     return free[i] ?? null
   })
   const first = parsed.rows[0]?.map((c) => c.trim().toLowerCase()) ?? []

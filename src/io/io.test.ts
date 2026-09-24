@@ -93,7 +93,7 @@ describe('импорт текста', () => {
     const nt = await wordType()
     const p = parseText(buf('#separator:tab\n#deck column:1\nEnglish::Food\tapple\tяблоко\t\n'))
     const plan = suggestPlan(p, nt, 1, null)
-    expect(plan.fieldColumns).toEqual([1, 2, 3])
+    expect(plan.fieldColumns).toEqual([1, 2, 3, null])
     await importTextRows(p, plan)
     const deck = await db.decks.where('name').equals('English::Food').first()
     expect(deck).toBeDefined()

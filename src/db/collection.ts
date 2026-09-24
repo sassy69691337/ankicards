@@ -198,10 +198,11 @@ export async function deckTree(): Promise<DeckNode[]> {
   return tree.filter((n) => !(n.deck.name === DEFAULT_DECK_NAME && n.total === 0 && n.children.length === 0 && tree.length > 1))
 }
 
-export async function todayStats(): Promise<{ count: number; ms: number }> {
+/** Сегодня: count — ответов, cards — уникальных карточек, ms — время ответов */
+export async function todayStats(): Promise<{ count: number; cards: number; ms: number }> {
   const t = schedTime()
   const logs = await db.revlog.where('time').aboveOrEqual(t.dayStart).toArray()
-  return { count: logs.length, ms: logs.reduce((s, l) => s + l.duration, 0) }
+  return { count: logs.length, cards: new Set(logs.map((l) => l.cardId)).size, ms: logs.reduce((s, l) => s + l.duration, 0) }
 }
 
 // ---------- Учёба ----------
@@ -230,7 +231,7 @@ export async function deckInfo(deckId: number) {
   if (!ctx) return null
   const t = schedTime()
   const [counts, cards] = await Promise.all([studyCounts(ctx, t), db.cards.where('deckId').anyOf(ctx.ids).toArray()])
-  const totals = { total: cards.length, new: 0, learning: 0, young: 0, mature: 0, suspended: 0 }
+  const totals = { total: cards.length, notes: new Set(cards.map((c) => c.noteId)).size, new: 0, learning: 0, young: 0, mature: 0, suspended: 0 }
   for (const c of cards) {
     if (c.queue === Queue.Suspended) totals.suspended++
     else if (c.type === CardType.New) totals.new++
@@ -611,33 +612,49 @@ export async function moveNoteCards(noteId: number, deckId: number): Promise<voi
 
 export interface NoteHit {
   note: Note
-  card?: Card
+  /** Карточки заметки в выбранной области поиска, по порядку шаблонов */
+  cards: Card[]
 }
 
-export async function searchNotes(query: string, deckId: number, limit = 200): Promise<{ total: number; hits: NoteHit[] }> {
-  const firstCard = new Map<number, Card>()
-  const remember = (c: Card) => {
-    const prev = firstCard.get(c.noteId)
-    if (!prev || c.ord < prev.ord) firstCard.set(c.noteId, c)
-  }
-  let notes: Note[]
+export type CardStatusKey = 'new' | 'learn' | 'review' | 'suspended' | 'buried'
+
+export function cardStatusKey(c: Card): CardStatusKey {
+  if (c.queue === Queue.Suspended) return 'suspended'
+  if (c.queue < 0) return 'buried'
+  if (c.type === CardType.New) return 'new'
+  if (c.queue === Queue.Learn || c.queue === Queue.DayLearn) return 'learn'
+  return 'review'
+}
+
+export async function searchNotes(
+  query: string,
+  deckId: number,
+  status: CardStatusKey | '' = '',
+  limit = 200,
+): Promise<{ total: number; totalCards: number; hits: NoteHit[] }> {
+  let cards: Card[]
   if (deckId) {
     const deck = await db.decks.get(deckId)
-    const ids = deck ? await subtreeIds(deck) : []
-    ;(await db.cards.where('deckId').anyOf(ids).toArray()).forEach(remember)
-    notes = (await db.notes.bulkGet([...firstCard.keys()])).filter(isDefined)
+    cards = deck ? await db.cards.where('deckId').anyOf(await subtreeIds(deck)).toArray() : []
   } else {
-    notes = await db.notes.toArray()
+    cards = await db.cards.toArray()
   }
-  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const filtered = terms.length
-    ? notes.filter((n) => {
-        const hay = `${plainText(stripCloze(n.fields.join(' ')))} ${n.tags.join(' ')}`.toLowerCase()
-        return terms.every((term) => hay.includes(term))
-      })
-    : notes
+  const byNote = new Map<number, Card[]>()
+  for (const c of cards) {
+    const list = byNote.get(c.noteId)
+    if (list) list.push(c)
+    else byNote.set(c.noteId, [c])
+  }
+  const notes = deckId ? (await db.notes.bulkGet([...byNote.keys()])).filter(isDefined) : await db.notes.toArray()
+  const terms = query.trim().toLowerCase().split(/s+/).filter(Boolean)
+  const filtered = notes.filter((n) => {
+    if (status && !(byNote.get(n.id) ?? []).some((c) => cardStatusKey(c) === status)) return false
+    if (!terms.length) return true
+    const hay = `${plainText(stripCloze(n.fields.join(' ')))} ${n.tags.join(' ')}`.toLowerCase()
+    return terms.every((term) => hay.includes(term))
+  })
   filtered.sort((a, b) => b.createdAt - a.createdAt)
-  const page = filtered.slice(0, limit)
-  if (!deckId && page.length) (await db.cards.where('noteId').anyOf(page.map((n) => n.id)).toArray()).forEach(remember)
-  return { total: filtered.length, hits: page.map((note) => ({ note, card: firstCard.get(note.id) })) }
+  const totalCards = filtered.reduce((sum, n) => sum + (byNote.get(n.id)?.length ?? 0), 0)
+  const hits = filtered.slice(0, limit).map((note) => ({ note, cards: (byNote.get(note.id) ?? []).sort((a, b) => a.ord - b.ord) }))
+  return { total: filtered.length, totalCards, hits }
 }

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Иконка «Coral Glass»: коралловое стекло, светлый знак. Фон на всю площадь (для maskable и iOS) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF8B74"/>
+      <stop offset="1" stop-color="#FF5A45"/>
+    </linearGradient>
+    <radialGradient id="gloss" cx="0.28" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.35"/>
+      <stop offset="0.6" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="1.6" stdDeviation="2" flood-color="#8A1E10" flood-opacity="0.3"/>
+    </filter>
+    <mask id="b" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48">
+      <rect width="48" height="48" fill="#fff"/>
+      <path d="M22 13H32L41 22V38A5 5 0 0 1 36 43H22A5 5 0 0 1 17 38V18A5 5 0 0 1 22 13Z" fill="#000" stroke="#000" stroke-width="5" stroke-linejoin="round"/>
+    </mask>
+    <mask id="f" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48">
+      <rect width="48" height="48" fill="#fff"/>
+      <path d="M32 13V18A4 4 0 0 0 36 22H41" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round"/>
+    </mask>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#gloss)"/>
+  <g filter="url(#shadow)" transform="translate(110 100) scale(6.6)">
+    <rect x="6" y="7" width="22" height="30" rx="5" transform="rotate(-13 17 22)" mask="url(#b)" fill="#FFE3DC"/>
+    <path d="M22 13H32L41 22V38A5 5 0 0 1 36 43H22A5 5 0 0 1 17 38V18A5 5 0 0 1 22 13Z" mask="url(#f)" fill="#FFF8F6"/>
+  </g>
+</svg>

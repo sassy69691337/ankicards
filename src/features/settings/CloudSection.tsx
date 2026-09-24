@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cloud, CloudAlert, CloudCheck, CloudOff, LogOut, RefreshCw } from 'lucide-react'
+import { Cloud, CloudAlert, CloudCheck, CloudOff, LogOut, RefreshCw, WifiOff } from 'lucide-react'
 import { errMsg, plural } from '../../core/format'
 import { getLinkInfo, linkWith, requestSync, signIn, signOut, signUp, useCloud, type CloudState } from '../../sync/cloud'
 import type { LinkMode } from '../../sync/engine'
+import { useOnline } from '../../app/useOnline'
 import { ListGroup, ListRow } from '../../ui/List'
-import { Field, Input } from '../../ui/forms'
+import { Field, FieldError, Input } from '../../ui/forms'
 import { Button, IconButton } from '../../ui/Button'
 import { Sheet } from '../../ui/Sheet'
 import { confirmDialog } from '../../ui/dialogs'
@@ -14,17 +15,23 @@ import { cn } from '../../ui/cn'
 
 const notesWord = (n: number) => plural(n, ['заметка', 'заметки', 'заметок'])
 
-function statusText(s: CloudState): string {
-  if (s.phase === 'syncing') return 'Синхронизация…'
-  if (s.phase === 'error') return `Ошибка: ${s.error ?? 'неизвестная'}`
-  if (!s.lastAt) return 'Ещё не синхронизировано'
-  const d = new Date(s.lastAt)
+function formatWhen(at: number): string {
+  const d = new Date(at)
   const today = new Date().toDateString() === d.toDateString()
-  return `Синхронизировано ${today ? 'сегодня в ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}`
+  return today ? `сегодня в ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : d.toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function statusText(s: CloudState, online: boolean): string {
+  if (!online) return 'Нет сети. Изменения сохраняются на устройстве и отправятся, когда связь появится'
+  if (s.phase === 'syncing') return 'Синхронизация…'
+  if (s.phase === 'error') return 'Не удалось синхронизировать'
+  if (!s.lastAt) return 'Ещё не синхронизировано'
+  return `Синхронизировано ${formatWhen(s.lastAt)}`
 }
 
 export function CloudSection() {
   const cloud = useCloud()
+  const online = useOnline()
   const [authOpen, setAuthOpen] = useState(false)
   const [choice, setChoice] = useState<{ remote: number; localNotes: number } | null>(null)
 
@@ -52,11 +59,11 @@ export function CloudSection() {
   return (
     <>
       <ListGroup
-        title="Облако"
+        title="Аккаунт и синхронизация"
         footer={
-          cloud.user
-            ? 'Изменения отправляются автоматически: при открытии приложения, после учёбы и каждые 5 минут.'
-            : 'Карточки и прогресс будут храниться в облаке и восстановятся на новом телефоне.'
+          cloud.user && cloud.phase !== 'link'
+            ? 'Изменения отправляются автоматически: при открытии приложения, после занятия и каждые 5 минут.'
+            : 'Без входа карточки хранятся только на этом устройстве. С облаком они восстановятся на новом телефоне.'
         }
       >
         {!cloud.user && <ListRow icon={<Cloud />} label="Войти в облако" hint="Синхронизация выключена" onClick={() => setAuthOpen(true)} />}
@@ -66,22 +73,38 @@ export function CloudSection() {
         )}
 
         {cloud.user && cloud.phase !== 'link' && (
-          <div className="flex items-center gap-3 px-4 py-3">
-            <span
-              className={cn(
-                'grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 [&_svg]:size-[18px]',
-                cloud.phase === 'error' ? 'text-red-500' : 'text-accent',
+          <div className="px-4 py-3">
+            <div className="flex items-start gap-3">
+              <span
+                className={cn(
+                  'mt-0.5 grid size-9 shrink-0 place-items-center rounded-[12px] [&_svg]:size-5',
+                  cloud.phase === 'error' ? 'bg-danger-soft text-danger' : 'bg-accent-soft text-accent-text',
+                )}
+              >
+                {!online ? <WifiOff /> : cloud.phase === 'error' ? <CloudAlert /> : <CloudCheck />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="break-all text-base leading-6">{cloud.user.email}</p>
+                <p className={cn('text-sm', cloud.phase === 'error' && online ? 'font-medium text-danger' : 'text-muted')}>{statusText(cloud, online)}</p>
+              </div>
+              {cloud.phase !== 'error' && (
+                <IconButton label="Синхронизировать сейчас" disabled={cloud.phase === 'syncing' || !online} onClick={() => void requestSync()} className="-my-1 text-muted">
+                  <RefreshCw className={cn(cloud.phase === 'syncing' && 'animate-spin')} />
+                </IconButton>
               )}
-            >
-              {cloud.phase === 'error' ? <CloudAlert /> : <CloudCheck />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px]">{cloud.user.email}</span>
-              <span className={cn('block text-xs', cloud.phase === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted')}>{statusText(cloud)}</span>
-            </span>
-            <IconButton label="Синхронизировать" disabled={cloud.phase === 'syncing'} onClick={() => void requestSync()}>
-              <RefreshCw className={cn(cloud.phase === 'syncing' && 'animate-spin')} />
-            </IconButton>
+            </div>
+            {cloud.phase === 'error' && online && (
+              <div className="mt-3 rounded-[16px] bg-danger-soft px-3.5 py-3 text-[15px] leading-[22px] text-danger">
+                <p>Причина: {cloud.error ?? 'неизвестная ошибка'}.</p>
+                <p className="mt-0.5">
+                  {cloud.lastAt ? `Последняя успешная синхронизация — ${formatWhen(cloud.lastAt)}.` : 'Успешной синхронизации ещё не было.'} Данные на устройстве сохранены.
+                </p>
+                <Button size="sm" variant="secondary" className="mt-2.5" onClick={() => void requestSync()}>
+                  <RefreshCw className="size-4" />
+                  Повторить
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -89,9 +112,16 @@ export function CloudSection() {
           <ListRow
             icon={<LogOut />}
             label="Выйти из аккаунта"
-            hint="Карточки на телефоне останутся"
+            hint="Карточки на этом устройстве останутся"
             onClick={async () => {
-              if (await confirmDialog({ title: 'Выйти из аккаунта?', message: 'Карточки останутся на телефоне, но перестанут сохраняться в облако.', confirmText: 'Выйти' })) {
+              if (
+                await confirmDialog({
+                  title: 'Выйти из аккаунта?',
+                  message:
+                    'Колоды, карточки и прогресс останутся на этом устройстве. Новые изменения перестанут сохраняться в облако, пока вы снова не войдёте.',
+                  confirmText: 'Выйти',
+                })
+              ) {
                 await signOut()
               }
             }}
@@ -112,13 +142,13 @@ export function CloudSection() {
       <Sheet open={!!choice} onClose={() => setChoice(null)} title="Где ваши карточки?">
         {choice && (
           <div className="space-y-3">
-            <p className="text-sm text-muted">
+            <p className="text-[15px] leading-[22px] text-muted">
               В облаке уже есть данные этого аккаунта, и на телефоне тоже ({choice.localNotes} {notesWord(choice.localNotes)}). Объединить их нельзя — выберите, что оставить.
             </p>
             <Button size="lg" className="w-full" onClick={() => void connect('download')}>
               Взять из облака
             </Button>
-            <p className="-mt-1 px-1 text-xs text-muted">Карточки на телефоне заменятся данными из облака.</p>
+            <p className="-mt-1 px-1 text-sm text-muted">Карточки на телефоне заменятся данными из облака.</p>
             <Button
               size="lg"
               variant="secondary"
@@ -145,13 +175,13 @@ export function CloudSection() {
 function AuthSheet({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'in' | 'up' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function run(action: 'in' | 'up', e?: FormEvent) {
     e?.preventDefault()
     if (busy) return
-    setBusy(true)
+    setBusy(action)
     setError(null)
     try {
       await (action === 'in' ? signIn(email, password) : signUp(email, password))
@@ -160,7 +190,7 @@ function AuthSheet({ open, onClose, onDone }: { open: boolean; onClose: () => vo
     } catch (err) {
       setError(errMsg(err))
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
@@ -181,13 +211,13 @@ function AuthSheet({ open, onClose, onDone }: { open: boolean; onClose: () => vo
             minLength={6}
           />
         </Field>
-        {error && <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">{error}</p>}
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" className="flex-1" disabled={busy || !email || password.length < 6} onClick={() => void run('up')}>
-            Создать аккаунт
-          </Button>
-          <Button type="submit" className="flex-1" disabled={busy || !email || !password}>
+        {error && <FieldError>{error}</FieldError>}
+        <div className="flex flex-col gap-2 min-[400px]:flex-row-reverse">
+          <Button type="submit" size="lg" className="flex-1" loading={busy === 'in'} disabled={!!busy || !email || !password}>
             Войти
+          </Button>
+          <Button type="button" variant="secondary" size="lg" className="flex-1" loading={busy === 'up'} disabled={!!busy || !email || password.length < 6} onClick={() => void run('up')}>
+            Создать аккаунт
           </Button>
         </div>
       </form>
@@ -195,23 +225,34 @@ function AuthSheet({ open, onClose, onDone }: { open: boolean; onClose: () => vo
   )
 }
 
-/** Значок состояния облака для заголовка */
+/** Значок состояния синхронизации для шапки «Колоды» */
 export function CloudBadge() {
   const cloud = useCloud()
+  const online = useOnline()
   const nav = useNavigate()
-  if (!cloud.user) return null
-  const icon =
-    cloud.phase === 'syncing' ? (
-      <RefreshCw className="animate-spin" />
-    ) : cloud.phase === 'error' ? (
-      <CloudAlert className="text-red-500" />
-    ) : cloud.phase === 'link' ? (
-      <CloudOff className="text-muted" />
-    ) : (
-      <CloudCheck className="text-muted" />
-    )
+  if (!cloud.ready) return null
+  let icon = <CloudOff className="text-muted" />
+  let label = 'Синхронизация выключена'
+  if (cloud.user) {
+    if (!online) {
+      icon = <WifiOff className="text-muted" />
+      label = 'Нет сети — изменения отправятся позже'
+    } else if (cloud.phase === 'syncing') {
+      icon = <RefreshCw className="animate-spin text-muted" />
+      label = 'Синхронизация…'
+    } else if (cloud.phase === 'error') {
+      icon = <CloudAlert className="text-danger" />
+      label = 'Ошибка синхронизации'
+    } else if (cloud.phase === 'link') {
+      icon = <CloudOff className="text-muted" />
+      label = 'Синхронизация не включена'
+    } else {
+      icon = <CloudCheck className="text-muted" />
+      label = statusText(cloud, online)
+    }
+  }
   return (
-    <IconButton label={statusText(cloud)} onClick={() => nav('/settings')}>
+    <IconButton label={label} variant="surface" onClick={() => nav('/settings')}>
       {icon}
     </IconButton>
   )

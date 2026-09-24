@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronRight, DatabaseBackup, FileUp, FolderPlus, Layers, Plus, Shuffle } from 'lucide-react'
+import { CalendarDays, ChevronRight, DatabaseBackup, Ellipsis, FileUp, FolderPlus, Plus } from 'lucide-react'
 import { getConfig } from '../../db/db'
-import { createDeck, deckTree, todayStats, type DeckNode } from '../../db/collection'
-import { cardsWord, errMsg } from '../../core/format'
+import { deckTree, mixedSource, todayStats, type DeckNode } from '../../db/collection'
+import { cardsWord, formatInterval } from '../../core/format'
 import { PageBody, PageHeader } from '../../ui/PageHeader'
 import { Button, IconButton } from '../../ui/Button'
-import { EmptyState } from '../../ui/List'
-import { promptDialog } from '../../ui/dialogs'
-import { toast } from '../../ui/toast'
+import { EmptyState, Notice } from '../../ui/List'
+import { ActionSheet } from '../../ui/Sheet'
+import { LogoMark } from '../../ui/Logo'
 import { cn } from '../../ui/cn'
+import { useCloud } from '../../sync/cloud'
 import { CloudBadge } from '../settings/CloudSection'
+import { askNewDeck, useDeckMenu } from './DeckMenu'
 
 const COLLAPSE_KEY = 'decks.collapsed'
 
@@ -31,27 +33,16 @@ function flatten(nodes: DeckNode[], collapsed: Set<number>, out: DeckNode[] = []
   return out
 }
 
-export async function askNewDeck(parent?: string): Promise<number | null> {
-  const name = await promptDialog({
-    title: parent ? 'Новая подколода' : 'Новая колода',
-    message: parent ? `Внутри «${parent}»` : 'Для подколоды используйте «::», например English::Глаголы',
-    placeholder: 'Название',
-    confirmText: 'Создать',
-  })
-  if (!name?.trim()) return null
-  try {
-    return await createDeck(parent ? `${parent}::${name}` : name)
-  } catch (e) {
-    toast(errMsg(e), 'error')
-    return null
-  }
-}
-
 export default function DecksPage() {
   const tree = useLiveQuery(deckTree, [])
   const stats = useLiveQuery(todayStats, [])
+  const nextDue = useLiveQuery(async () => (await mixedSource()).nextLearnDue(), [])
+  const rollover = useLiveQuery(() => getConfig('rolloverHour', 4), [])
   const lastBackup = useLiveQuery(() => getConfig<number | null>('lastBackupAt', null), [])
+  const cloud = useCloud()
   const [collapsed, setCollapsed] = useState(loadCollapsed)
+  const [addMenu, setAddMenu] = useState(false)
+  const deckMenu = useDeckMenu()
   const nav = useNavigate()
 
   async function onCreate() {
@@ -74,7 +65,9 @@ export default function DecksPage() {
   const rows = tree ? flatten(tree, collapsed) : []
   const due = tree?.reduce((s, n) => s + n.counts.new + n.counts.learn + n.counts.review, 0) ?? 0
   const totalCards = tree?.reduce((s, n) => s + n.total, 0) ?? 0
-  const needBackup = totalCards >= 20 && lastBackup !== undefined && (!lastBackup || Date.now() - lastBackup > 7 * 86_400_000)
+  const synced = !!cloud.user && cloud.phase !== 'link'
+  const needBackup = !synced && totalCards >= 20 && lastBackup !== undefined && (!lastBackup || Date.now() - lastBackup > 7 * 86_400_000)
+  const empty = tree && totalCards === 0 && rows.length <= 1
 
   return (
     <>
@@ -84,126 +77,194 @@ export default function DecksPage() {
         actions={
           <>
             <CloudBadge />
-            <IconButton label="Импорт" onClick={() => nav('/import')}>
-              <FileUp />
-            </IconButton>
-            <IconButton label="Новая колода" onClick={onCreate}>
-              <FolderPlus />
+            <IconButton label="Создать колоду или импортировать" variant="accent" onClick={() => setAddMenu(true)}>
+              <Plus />
             </IconButton>
           </>
         }
       />
       <PageBody>
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 p-5 text-white shadow-lg shadow-indigo-500/20">
-          <div className="absolute -right-10 -top-12 size-40 rounded-full bg-white/10" />
-          <div className="absolute -bottom-16 right-16 size-32 rounded-full bg-white/5" />
-          <p className="text-sm font-medium text-white/75">Сегодня</p>
-          <div className="mt-1 flex items-end gap-2">
-            <span className="text-4xl font-bold tabular-nums">{due}</span>
-            <span className="pb-1 text-white/80">{cardsWord(due)} к изучению</span>
-          </div>
-          <p className="mt-3 text-sm text-white/75">
-            Изучено: {stats?.count ?? 0} · {Math.round((stats?.ms ?? 0) / 60000)} мин
-          </p>
-          {due > 0 && (
-            <button
-              type="button"
-              onClick={() => nav('/study/mix')}
-              className="relative mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-[15px] font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50 active:scale-[0.98]"
-            >
-              <Shuffle className="size-5" />
-              Учить всё вперемешку
-            </button>
-          )}
-        </section>
-
-        {needBackup && (
-          <button
-            type="button"
-            onClick={() => nav('/settings')}
-            className="flex w-full items-center gap-3 rounded-2xl bg-amber-500/10 px-4 py-3 text-left text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
-          >
-            <DatabaseBackup className="size-5 shrink-0" />
-            <span className="flex-1 text-sm">
-              <span className="block font-semibold">Сделайте резервную копию</span>
-              <span className="opacity-80">{lastBackup ? 'Последней копии больше недели.' : 'Карточки хранятся только на этом устройстве.'}</span>
-            </span>
-            <ChevronRight className="size-4 shrink-0 opacity-60" />
-          </button>
-        )}
-
-        {tree && totalCards === 0 && rows.length <= 1 ? (
+        {empty ? (
           <EmptyState
-            icon={<Layers />}
+            icon={<LogoMark />}
             title="Пока нет карточек"
-            text="Добавьте первые слова вручную или импортируйте CSV, TXT или колоду Anki (.apkg)."
+            text="Создайте колоду и добавьте слова или импортируйте CSV, TXT или колоду Anki (.apkg)."
             action={
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button onClick={() => nav('/add')}>
+              <div className="space-y-2">
+                <Button size="lg" className="w-full" onClick={() => nav('/add')}>
                   <Plus className="size-5" />
-                  Добавить карточку
+                  Добавить слово
                 </Button>
-                <Button variant="secondary" onClick={() => nav('/import')}>
+                <Button variant="secondary" size="lg" className="w-full" onClick={() => void onCreate()}>
+                  <FolderPlus className="size-5" />
+                  Создать колоду
+                </Button>
+                <Button variant="secondary" size="lg" className="w-full" onClick={() => nav('/import')}>
                   <FileUp className="size-5" />
-                  Импорт файла
+                  Импортировать
                 </Button>
               </div>
             }
           />
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
-            <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
-              <span className="flex-1">Колода</span>
-              <span className="w-9 text-right">Нов.</span>
-              <span className="w-9 text-right">Уч.</span>
-              <span className="w-9 text-right">Повт.</span>
-            </div>
-            <ul className="divide-y divide-line">
-              {rows.map((n) => (
-                <DeckRow key={n.deck.id} node={n} collapsed={collapsed.has(n.deck.id)} onToggle={() => toggle(n.deck.id)} />
-              ))}
-            </ul>
-          </div>
+          tree && (
+            <TodayCard
+              due={due}
+              studied={stats?.cards ?? 0}
+              nextDue={nextDue ?? null}
+              rollover={rollover ?? 4}
+              onStart={() => nav('/study/mix')}
+            />
+          )
+        )}
+
+        {needBackup && (
+          <Link to="/settings" className="block">
+            <Notice
+              tone="warning"
+              icon={<DatabaseBackup />}
+              title="Сделайте резервную копию"
+              action={<span className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline">Открыть настройки<ChevronRight className="size-4" /></span>}
+            >
+              {lastBackup ? 'Последней копии больше недели.' : 'Синхронизация выключена: карточки хранятся только на этом устройстве.'}
+            </Notice>
+          </Link>
+        )}
+
+        {!empty && rows.length > 0 && (
+          <ul className="space-y-2.5" aria-label="Колоды">
+            {rows.map((n) => (
+              <DeckTile
+                key={n.deck.id}
+                node={n}
+                collapsed={collapsed.has(n.deck.id)}
+                onToggle={() => toggle(n.deck.id)}
+                onMenu={() => deckMenu.open(n.deck)}
+              />
+            ))}
+          </ul>
         )}
       </PageBody>
+
+      <ActionSheet
+        open={addMenu}
+        onClose={() => setAddMenu(false)}
+        actions={[
+          { label: 'Создать колоду', icon: <FolderPlus />, onSelect: () => void onCreate() },
+          { label: 'Импортировать', icon: <FileUp />, onSelect: () => nav('/import') },
+        ]}
+      />
+      {deckMenu.element}
     </>
   )
 }
 
-function Count({ v, cls }: { v: number; cls: string }) {
-  return <span className={cn('w-9 text-right text-sm font-semibold tabular-nums', v ? cls : 'text-muted/40')}>{v}</span>
+function TodayCard({
+  due,
+  studied,
+  nextDue,
+  rollover,
+  onStart,
+}: {
+  due: number
+  studied: number
+  nextDue: number | null
+  rollover: number
+  onStart: () => void
+}) {
+  return (
+    <section
+      aria-labelledby="today-title"
+      className="relative overflow-hidden rounded-[28px] bg-[linear-gradient(145deg,var(--accent-soft)_0%,var(--surface)_78%)] p-5 ring-1 ring-accent/15"
+    >
+      <TodayArt />
+      <div className="relative">
+        <h2 id="today-title" className="flex items-center gap-2 text-base font-medium">
+          <CalendarDays className="size-5 text-accent-text" aria-hidden />
+          Сегодня
+        </h2>
+        {due > 0 ? (
+          <>
+            <p className="mt-2 min-[360px]:max-w-[62%]">
+              <span className="block text-[56px] font-bold leading-[60px] tracking-tight tabular-nums">{due}</span>
+              <span className="text-[17px] font-medium">{cardsWord(due)} к изучению</span>
+            </p>
+            <p className="mt-1 text-[15px] text-muted">Изучено сегодня: {studied}</p>
+            <Button size="lg" className="mt-5 w-full" onClick={onStart}>
+              Начать занятие
+              <ChevronRight className="size-5" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 max-w-[70%] text-[28px] font-bold leading-9 tracking-tight">На сегодня всё</p>
+            <p className="mt-1 max-w-[70%] text-[15px] leading-[22px] text-muted">
+              {nextDue
+                ? `Следующая карточка — через ${formatInterval((nextDue - Date.now()) / 1000)}.`
+                : `Новые карточки и повторения появятся после ${String(rollover).padStart(2, '0')}:00.`}
+            </p>
+            <p className="mt-1 text-[15px] text-muted">Изучено сегодня: {studied}</p>
+          </>
+        )}
+      </div>
+    </section>
+  )
 }
 
-function DeckRow({ node, collapsed, onToggle }: { node: DeckNode; collapsed: boolean; onToggle: () => void }) {
-  const hasKids = node.children.length > 0
+/** Декоративная пара карточек — знак приложения в «стекле» */
+function TodayArt() {
   return (
-    <li>
-      <Link
-        to={`/deck/${node.deck.id}`}
-        className="flex items-center gap-2 py-3.5 pr-4 transition hover:bg-surface-2 active:bg-surface-2"
-        style={{ paddingLeft: 8 + node.depth * 20 }}
-      >
-        {hasKids ? (
-          <button
-            type="button"
-            aria-label={collapsed ? 'Развернуть' : 'Свернуть'}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onToggle()
-            }}
-            className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-line/60"
-          >
-            <ChevronRight className={cn('size-4 transition-transform', !collapsed && 'rotate-90')} />
-          </button>
-        ) : (
-          <span className="size-7 shrink-0" />
+    <div aria-hidden className="pointer-events-none absolute right-0 top-5 hidden h-28 w-32 min-[360px]:block min-[400px]:right-3">
+      <div className="absolute right-10 top-1 h-24 w-18 -rotate-[13deg] rounded-[16px] bg-accent/25 ring-1 ring-white/50" />
+      <div className="absolute right-3 top-4 flex h-24 w-18 rotate-[6deg] items-end justify-center rounded-[16px] bg-surface/80 pb-3 shadow-[0_10px_24px_-10px_rgb(32_33_39/0.35)] ring-1 ring-white/70 dark:bg-surface/70 dark:ring-white/10">
+        <LogoMark className="size-9 text-accent" />
+      </div>
+    </div>
+  )
+}
+
+function Counter({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="whitespace-nowrap">
+      {label} <span className={cn('font-semibold tabular-nums', value ? 'text-fg' : 'text-muted')}>{value}</span>
+    </span>
+  )
+}
+
+function DeckTile({ node, collapsed, onToggle, onMenu }: { node: DeckNode; collapsed: boolean; onToggle: () => void; onMenu: () => void }) {
+  const hasKids = node.children.length > 0
+  const { counts } = node
+  return (
+    <li style={{ marginLeft: Math.min(node.depth, 3) * 16 }}>
+      <div className="flex items-center rounded-[24px] bg-surface pr-1 ring-1 ring-line/70 transition hover:ring-line">
+        <Link
+          to={`/deck/${node.deck.id}`}
+          aria-label={`${node.deck.name.split('::').join(', ')}. Новые ${counts.new}, учим ${counts.learn}, повтор ${counts.review}`}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-[24px] py-3.5 pl-3.5 pr-1 active:bg-surface-2/60"
+        >
+          <span className="grid size-12 shrink-0 place-items-center rounded-[16px] bg-accent-soft text-accent-text" aria-hidden>
+            <LogoMark className="size-7" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="line-clamp-2 break-words text-[17px] font-semibold leading-[22px]">{node.name}</span>
+            <span className="mt-1 flex flex-wrap gap-x-2 text-sm text-muted">
+              <Counter label="Новые" value={counts.new} />
+              <span aria-hidden>·</span>
+              <Counter label="Учим" value={counts.learn} />
+              <span aria-hidden>·</span>
+              <Counter label="Повтор" value={counts.review} />
+            </span>
+          </span>
+        </Link>
+        {hasKids && (
+          <IconButton label={collapsed ? 'Показать подколоды' : 'Скрыть подколоды'} aria-expanded={!collapsed} onClick={onToggle} className="text-muted">
+            <ChevronRight className={cn('transition-transform', !collapsed && 'rotate-90')} />
+          </IconButton>
         )}
-        <span className={cn('min-w-0 flex-1 truncate text-[15px]', node.depth === 0 ? 'font-semibold' : 'font-medium')}>{node.name}</span>
-        <Count v={node.counts.new} cls="text-new" />
-        <Count v={node.counts.learn} cls="text-learn" />
-        <Count v={node.counts.review} cls="text-review" />
-      </Link>
+        <IconButton label={`Действия с колодой ${node.name}`} onClick={onMenu} className="text-muted">
+          <Ellipsis />
+        </IconButton>
+      </div>
     </li>
   )
 }

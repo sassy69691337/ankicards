@@ -39,14 +39,22 @@ const WORD_CSS = `${CSS}
 }
 `
 
+/** Поле-флаг типа «Слово (+ обратная)»: непустое значение отключает обратную карточку.
+ * У старых заметок поля нет — обратная карточка для них включена, как и раньше */
+export const NO_REVERSE_FIELD = 'Без обратной'
+/** Поле-флаг типа «Основная (обратная по желанию)»: непустое значение включает обратную карточку */
+export const ADD_REVERSE_FIELD = 'Добавить обратную'
+export const WORD_TYPE_NAME = 'Слово (+ обратная)'
+export const WORD_REVERSE_QFMT = `{{^${NO_REVERSE_FIELD}}}{{Перевод}}{{/${NO_REVERSE_FIELD}}}`
+
 const answer = (front: string, back: string): CardTemplate['afmt'] =>
   `${front}\n\n<hr id=answer>\n\n${back}`
 
 export const DEFAULT_NOTE_TYPES: Omit<NoteType, 'id' | 'createdAt'>[] = [
   {
-    name: 'Слово (+ обратная)',
+    name: WORD_TYPE_NAME,
     kind: 'standard',
-    fields: ['Слово', 'Перевод', 'Пример'],
+    fields: ['Слово', 'Перевод', 'Пример', NO_REVERSE_FIELD],
     templates: [
       {
         name: 'Слово → перевод',
@@ -55,7 +63,7 @@ export const DEFAULT_NOTE_TYPES: Omit<NoteType, 'id' | 'createdAt'>[] = [
       },
       {
         name: 'Перевод → слово',
-        qfmt: '{{Перевод}}',
+        qfmt: WORD_REVERSE_QFMT,
         afmt: answer('{{FrontSide}}', '{{Слово}}\n{{#Пример}}<div class="example">{{Пример}}</div>{{/Пример}}'),
       },
     ],
@@ -81,7 +89,7 @@ export const DEFAULT_NOTE_TYPES: Omit<NoteType, 'id' | 'createdAt'>[] = [
   {
     name: 'Основная (обратная по желанию)',
     kind: 'standard',
-    fields: ['Лицо', 'Оборот', 'Добавить обратную'],
+    fields: ['Лицо', 'Оборот', ADD_REVERSE_FIELD],
     templates: [
       { name: 'Карточка 1', qfmt: '{{Лицо}}', afmt: answer('{{FrontSide}}', '{{Оборот}}') },
       {

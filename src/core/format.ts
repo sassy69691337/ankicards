@@ -27,7 +27,10 @@ export function plural(n: number, forms: [string, string, string]): string {
 export const cardsWord = (n: number) => plural(n, ['карточка', 'карточки', 'карточек'])
 
 export function formatDay(day: number): string {
-  return new Date(dayStart(day)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+  const d = new Date(dayStart(day))
+  // Год показываем, только если он не текущий
+  const year = d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' as const } : {}
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', ...year })
 }
 
 /** "1m 10m 1h 1d" -> минуты. null при ошибке */

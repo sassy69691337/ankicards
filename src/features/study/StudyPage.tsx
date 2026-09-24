@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, Ellipsis, EyeOff, Flag, PartyPopper, Pause, Pencil, Star, Trash2, Undo2, Volume2, X } from 'lucide-react'
+import { CircleCheck, Clock, Ellipsis, EyeOff, Flag, Pause, Pencil, Star, Trash2, Undo2, Volume2, X } from 'lucide-react'
 import { db } from '../../db/db'
 import {
   answerCardOp,
@@ -8,6 +8,7 @@ import {
   buryCards,
   deleteNote,
   deckSource,
+  leafName,
   loadCardView,
   mixedSource,
   setCardFlag,
@@ -20,21 +21,24 @@ import {
   type StudySource,
   type UndoEntry,
 } from '../../db/collection'
-import { Queue, type Card } from '../../db/types'
+import type { Card } from '../../db/types'
+import { DEFAULT_NOTE_TYPES } from '../../db/defaults'
 import { previewIntervals, type Rating } from '../../core/scheduler'
 import { renderCard, stripCloze, templateUsesField } from '../../core/template'
-import { plainText } from '../../core/text'
+import { plainText, stripHtml } from '../../core/text'
 import { schedTime } from '../../core/time'
 import { cardsWord, errMsg, formatInterval } from '../../core/format'
 import { playSounds, soundNames, stopAudio } from '../../core/media'
 import { speak, stopSpeech } from '../../core/tts'
 import { useIsDark } from '../../app/theme'
 import { Button, IconButton } from '../../ui/Button'
+import { ProgressBar, StatusBadge } from '../../ui/List'
 import { ActionSheet, Sheet } from '../../ui/Sheet'
 import { confirmDialog } from '../../ui/dialogs'
 import { toast } from '../../ui/toast'
 import { cn } from '../../ui/cn'
 import { NoteEditForm } from '../editor/NoteEditForm'
+import { cardName, cardStatus } from '../editor/cardStatus'
 import { requestSync } from '../../sync/cloud'
 import { CardView } from './CardView'
 
@@ -53,12 +57,16 @@ export const FLAGS = [
   { n: 7, name: 'Фиолетовый', color: '#a855f7' },
 ]
 
+// «Хорошо» — основной коралловый акцент; остальные — мягкие нейтральные и семантические оттенки
 const RATINGS: { r: Rating; label: string; cls: string }[] = [
-  { r: 1, label: 'Снова', cls: 'bg-rose-500/15 text-rose-600 dark:text-rose-400' },
-  { r: 2, label: 'Трудно', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-400' },
-  { r: 3, label: 'Хорошо', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
-  { r: 4, label: 'Легко', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-400' },
+  { r: 1, label: 'Снова', cls: 'bg-danger-soft text-fg ring-1 ring-inset ring-danger/15' },
+  { r: 2, label: 'Трудно', cls: 'bg-warning-soft text-fg ring-1 ring-inset ring-warning/15' },
+  { r: 3, label: 'Хорошо', cls: 'bg-accent text-accent-fg shadow-[0_8px_20px_-10px_var(--accent)]' },
+  { r: 4, label: 'Легко', cls: 'bg-surface text-fg ring-1 ring-inset ring-line' },
 ]
+
+/** CSS встроенных типов: к ним применяется типографика Coral Glass */
+const BUILTIN_CSS = new Set(DEFAULT_NOTE_TYPES.map((t) => t.css))
 
 /** Что озвучить на этой стороне (null — нечего) */
 function ttsFor(view: CardViewData, side: 'q' | 'a', manual = false): { text: string; lang: string } | null {
@@ -75,6 +83,14 @@ function ttsFor(view: CardViewData, side: 'q' | 'a', manual = false): { text: st
   return text ? { text, lang: s.lang } : null
 }
 
+/** Текст ответа для экранного диктора: без повторного чтения вопроса */
+function answerText(q: string, a: string): string {
+  const qt = stripHtml(q).trim()
+  let at = stripHtml(a).trim()
+  if (qt && at.startsWith(qt)) at = at.slice(qt.length).trim()
+  return at
+}
+
 export default function StudyPage({ mix = false }: { mix?: boolean }) {
   const deckId = Number(useParams().id)
   const nav = useNavigate()
@@ -85,7 +101,11 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [flagOpen, setFlagOpen] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [announce, setAnnounce] = useState('')
+  const [deckTitle, setDeckTitle] = useState<string | null>(null)
   const [session, setSession] = useState({ count: 0, started: Date.now() })
+  const answered = useRef<number[]>([])
   const srcRef = useRef<StudySource | null>(null)
   const undoStack = useRef<UndoEntry[]>([])
   const learnAhead = useRef(false)
@@ -125,6 +145,7 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
       if (!view) return false
       const { q } = renderCard(view.nt, view.note, card.ord, view.deck.name)
       setState({ status: 'card', view, q, a: '', flipped: false, ivls: previewIntervals(card, view.opts, schedTime()) })
+      setAnnounce('')
       shownAt.current = Date.now()
       autoplay(view, q, 'q')
       return true
@@ -160,6 +181,7 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
         nav('/', { replace: true })
         return
       }
+      if (ctx) setDeckTitle(leafName(ctx.deck.name))
       srcRef.current = src
       await loadNext()
     })()
@@ -193,21 +215,26 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
     const { view } = state
     const { a } = renderCard(view.nt, view.note, view.card.ord, view.deck.name, typed)
     setState({ ...state, a, flipped: true })
+    setAnnounce(`Ответ: ${answerText(state.q, a)}`)
     autoplay(view, a, 'a', state.q)
   }, [state, autoplay])
 
   const rate = useCallback(
     async (r: Rating) => {
+      // Повторное нажатие до завершения записи игнорируется
       if (state.status !== 'card' || !state.flipped || busy.current) return
       busy.current = true
+      setPending(true)
       try {
         pushUndo(await answerCardOp(state.view.card.id, r, Date.now() - shownAt.current))
+        answered.current.push(state.view.card.id)
         setSession((s) => ({ ...s, count: s.count + 1 }))
         await loadNext()
       } catch (e) {
         toast(errMsg(e), 'error')
       } finally {
         busy.current = false
+        setPending(false)
       }
     },
     [state, loadNext],
@@ -221,7 +248,10 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
     busy.current = true
     try {
       await applyUndo(e)
-      if (e.revlogId) setSession((s) => ({ ...s, count: Math.max(0, s.count - 1) }))
+      if (e.revlogId) {
+        setSession((s) => ({ ...s, count: Math.max(0, s.count - 1) }))
+        answered.current.pop()
+      }
       const card = e.showCardId ? await db.cards.get(e.showCardId) : undefined
       if (srcRef.current) setCounts(await srcRef.current.counts())
       if (!(card && card.queue >= 0 && (await showCard(card)))) await loadNext()
@@ -248,6 +278,8 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
       if (menuOpen || flagOpen || editing || document.querySelector('[role=dialog]')) return
       const origin = e.composedPath()[0] as HTMLElement | undefined
       if (origin && (origin.tagName === 'INPUT' || origin.tagName === 'TEXTAREA' || origin.isContentEditable)) return
+      // Enter на сфокусированной кнопке нажимает её саму
+      if (e.key === 'Enter' && origin?.tagName === 'BUTTON') return
       if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault()
         if (state.status === 'card') {
@@ -284,7 +316,7 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
       if (kind === 'delete') {
         const ok = await confirmDialog({
           title: 'Удалить заметку?',
-          message: 'Будут удалены все её карточки. Это нельзя отменить.',
+          message: 'Будут удалены все её карточки и прогресс. Это нельзя отменить.',
           confirmText: 'Удалить',
           danger: true,
         })
@@ -329,105 +361,132 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
   }
 
   const current = state.status === 'card' ? state.view : null
-  const kind = current ? (current.card.queue === Queue.New ? 'new' : current.card.queue === Queue.Review ? 'review' : 'learn') : null
   const flag = current ? FLAGS.find((f) => f.n === current.card.flags) : undefined
   const marked = current?.note.tags.includes('marked')
   const canSpeak =
     state.status === 'card' &&
     (soundNames(state.flipped ? state.a : state.q).length > 0 || !!ttsFor(state.view, state.flipped ? 'a' : 'q', true))
+  const remaining = counts.new + counts.learn + counts.review
+  const progress = session.count + remaining > 0 ? session.count / (session.count + remaining) : 1
+  const title = mix ? 'Все колоды' : (deckTitle ?? '')
+  const status = current ? cardStatus(current.card) : null
+  const builtin = current ? BUILTIN_CSS.has(current.nt.css) : false
+  const uniqueCards = new Set(answered.current).size
+  const minutes = Math.max(1, Math.round((Date.now() - session.started) / 60000))
 
   return (
     <div className="flex h-dvh flex-col bg-bg">
       <header className="shrink-0 pt-[env(safe-area-inset-top)]">
-        <div className="mx-auto flex h-14 max-w-2xl items-center gap-1 px-2">
-          <IconButton label="Закрыть" onClick={exit}>
-            <X />
-          </IconButton>
-          <div className="flex flex-1 items-center justify-center gap-5 text-base font-bold tabular-nums">
-            <CountBadge v={counts.new} cls="text-new" active={kind === 'new'} label="Новые" />
-            <CountBadge v={counts.learn} cls="text-learn" active={kind === 'learn'} label="Изучаются" />
-            <CountBadge v={counts.review} cls="text-review" active={kind === 'review'} label="Повторения" />
+        <div className="mx-auto max-w-[640px] px-4 pt-2 min-[360px]:px-5">
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold leading-5">{title}</p>
+              <p className="text-sm tabular-nums text-muted">{state.status === 'done' ? 'Готово' : `Осталось ${remaining}`}</p>
+            </div>
+            <IconButton label="Отменить последний ответ" disabled={!undoCount} onClick={() => void undo()} className="text-muted">
+              <Undo2 />
+            </IconButton>
+            <IconButton label="Действия с карточкой" disabled={!current} onClick={() => setMenuOpen(true)} className="text-muted">
+              <Ellipsis />
+            </IconButton>
+            <IconButton label="Закрыть занятие" variant="surface" onClick={exit}>
+              <X />
+            </IconButton>
           </div>
-          <IconButton label="Отменить" disabled={!undoCount} onClick={() => void undo()}>
-            <Undo2 />
-          </IconButton>
-          <IconButton label="Действия" disabled={!current} onClick={() => setMenuOpen(true)}>
-            <Ellipsis />
-          </IconButton>
+          <ProgressBar value={progress} label={`Ответов ${session.count}, осталось ${remaining}`} className="mt-2.5" />
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="mx-auto max-w-2xl pb-6 pt-2">
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 min-[360px]:px-5">
+        <div className="mx-auto max-w-[640px] pb-4 pt-4">
           {state.status === 'card' && (
             <article
               onClick={onCardClick}
               className={cn(
-                'relative min-h-[50dvh] overflow-hidden rounded-3xl border border-line bg-surface px-5 pb-10 pt-12 shadow-sm',
+                'relative flex min-h-[52dvh] flex-col overflow-hidden rounded-[28px] bg-surface px-5 pb-6 pt-3 shadow-[0_12px_32px_-18px_rgb(32_33_39/0.3)] ring-1 ring-line/70',
                 !state.flipped && 'cursor-pointer',
               )}
             >
-              {flag && <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: flag.color }} />}
-              <div className="absolute left-4 top-4 flex items-center gap-2 text-xs font-medium text-muted">
-                {marked && <Star className="size-4 fill-amber-400 text-amber-400" />}
-                <span className="max-w-48 truncate">{current?.deck.name.split('::').pop()}</span>
+              {flag && <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: flag.color }} title={`Флажок: ${flag.name}`} />}
+              <div className="flex min-h-11 items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+                  {status && <StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+                  <span className="truncate">{cardName(state.view.nt, state.view.card.ord)}</span>
+                  {mix && <span className="truncate">· {leafName(state.view.deck.name)}</span>}
+                  {marked && <Star className="size-4 fill-amber-400 text-amber-500" aria-label="Отмечена" />}
+                </div>
+                {canSpeak && (
+                  <button
+                    type="button"
+                    aria-label="Озвучить"
+                    onClick={replay}
+                    className="grid size-11 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-text transition active:scale-95"
+                  >
+                    <Volume2 className="size-5" />
+                  </button>
+                )}
               </div>
-              {canSpeak && (
-                <button
-                  type="button"
-                  aria-label="Озвучить"
-                  onClick={replay}
-                  className="absolute right-3 top-3 grid size-10 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-accent"
-                >
-                  <Volume2 className="size-5" />
-                </button>
-              )}
-              <div key={state.flipped ? 'a' : 'q'} className="animate-fade-in">
-                <CardView
-                  html={state.flipped ? state.a : state.q}
-                  css={state.view.nt.css}
-                  dark={dark}
-                  onRoot={(r) => {
-                    rootRef.current = r
-                  }}
-                  onEnter={flip}
-                />
+              <div className="flex-1 pb-6 pt-[max(24px,9dvh)]">
+                <div key={state.flipped ? 'a' : 'q'} className="animate-reveal">
+                  <CardView
+                    html={state.flipped ? state.a : state.q}
+                    css={state.view.nt.css}
+                    dark={dark}
+                    coral={builtin}
+                    onRoot={(r) => {
+                      rootRef.current = r
+                    }}
+                    onEnter={flip}
+                  />
+                </div>
               </div>
+              {!state.flipped && <p className="text-center text-[15px] text-muted">Вспомните ответ</p>}
             </article>
           )}
 
           {state.status === 'done' && (
-            <div className="flex min-h-[65dvh] animate-pop-in flex-col items-center justify-center text-center">
-              <div className="mb-5 grid size-20 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                <PartyPopper className="size-10" />
+            <div className="flex min-h-[60dvh] animate-pop-in flex-col items-center justify-center text-center">
+              <div className="mb-5 grid size-20 place-items-center rounded-full bg-success-soft text-success">
+                <CircleCheck className="size-10" aria-hidden />
               </div>
-              <h2 className="text-2xl font-bold">На сегодня всё!</h2>
-              <p className="mt-2 max-w-xs text-muted">
-                {session.count > 0
-                  ? `За эту сессию: ${session.count} ${cardsWord(session.count)}, ${Math.max(1, Math.round((Date.now() - session.started) / 60000))} мин.`
-                  : 'Новых карточек и повторений больше нет.'}
-              </p>
+              <h1 className="text-[28px] font-bold leading-9">{session.count > 0 ? 'Занятие завершено' : 'На сегодня всё'}</h1>
+              {session.count > 0 ? (
+                <dl className="mt-5 grid w-full max-w-sm grid-cols-3 gap-2">
+                  <Result label="ответов" value={session.count} />
+                  <Result label={cardsWord(uniqueCards)} value={uniqueCards} />
+                  <Result label="мин" value={minutes} />
+                </dl>
+              ) : (
+                <p className="mt-2 max-w-xs text-[15px] text-muted">Сегодня нет запланированных карточек.</p>
+              )}
               {state.nextDue && (
-                <p className="mt-1 text-sm text-muted">
+                <p className="mt-4 max-w-xs text-[15px] text-muted">
                   Следующая карточка на изучении — через {formatInterval((state.nextDue - Date.now()) / 1000)}
                 </p>
               )}
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <div className="mt-6 w-full max-w-sm space-y-2">
+                <Button size="lg" className="w-full" onClick={() => nav('/')}>
+                  К колодам
+                </Button>
                 {state.nextDue && (
                   <Button
                     variant="soft"
+                    size="lg"
+                    className="w-full"
                     onClick={() => {
                       learnAhead.current = true
                       void loadNext()
                     }}
                   >
-                    <Clock className="size-4" />
+                    <Clock className="size-5" />
                     Учить сейчас
                   </Button>
                 )}
-                <Button variant="secondary" onClick={exit}>
-                  {mix ? 'К колодам' : 'К колоде'}
-                </Button>
+                {!mix && (
+                  <Button variant="ghost" size="lg" className="w-full" onClick={exit}>
+                    Открыть колоду
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -435,23 +494,28 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
       </main>
 
       {state.status === 'card' && (
-        <footer className="shrink-0 border-t border-line/70 bg-surface/85 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-3 backdrop-blur-xl">
-          <div className="mx-auto max-w-2xl">
+        <footer className="shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 min-[360px]:px-5">
+          <div className="mx-auto max-w-[640px]">
             {!state.flipped ? (
-              <Button size="lg" className="h-16 w-full text-[17px]" onClick={flip}>
+              <Button size="lg" className="min-h-15 w-full text-[18px]" onClick={flip}>
                 Показать ответ
               </Button>
             ) : (
-              <div className="grid animate-pop-in grid-cols-4 gap-2">
+              <div className="grid animate-reveal grid-cols-2 gap-2.5" role="group" aria-label="Оценка ответа">
                 {RATINGS.map(({ r, label, cls }) => (
                   <button
                     key={r}
                     type="button"
+                    disabled={pending}
+                    aria-label={`${label}, следующий показ через ${formatInterval(state.ivls[r])}`}
                     onClick={() => void rate(r)}
-                    className={cn('flex h-16 flex-col items-center justify-center rounded-2xl font-semibold transition active:scale-95', cls)}
+                    className={cn(
+                      'flex min-h-16 flex-col items-center justify-center rounded-[18px] font-semibold transition duration-100 active:scale-[0.97] disabled:opacity-60',
+                      cls,
+                    )}
                   >
-                    <span className="text-[15px]">{label}</span>
-                    <span className="text-xs font-medium opacity-75">{formatInterval(state.ivls[r])}</span>
+                    <span className="text-[17px] leading-6">{label}</span>
+                    <span className="text-sm font-medium opacity-80">{formatInterval(state.ivls[r])}</span>
                   </button>
                 ))}
               </div>
@@ -460,9 +524,14 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
         </footer>
       )}
 
+      <p className="sr-only" aria-live="polite">
+        {announce}
+      </p>
+
       <ActionSheet
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
+        title="Карточка"
         actions={[
           { label: 'Редактировать', icon: <Pencil />, onSelect: () => setEditing(true) },
           { label: 'Флажок', icon: <Flag />, onSelect: () => setFlagOpen(true) },
@@ -480,13 +549,14 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
             <button
               key={f.n}
               type="button"
+              aria-pressed={current?.card.flags === f.n}
               onClick={() => {
                 setFlagOpen(false)
                 void setFlag(current?.card.flags === f.n ? 0 : f.n)
               }}
               className={cn(
-                'flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-xs font-medium transition hover:bg-surface-2',
-                current?.card.flags === f.n ? 'border-accent' : 'border-line',
+                'flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-[18px] px-1 py-2.5 text-xs font-medium ring-1 ring-inset transition hover:bg-surface-2',
+                current?.card.flags === f.n ? 'bg-accent-soft ring-accent-text' : 'ring-line',
               )}
             >
               <Flag className="size-6" style={{ color: f.color, fill: f.color }} />
@@ -499,7 +569,7 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
               setFlagOpen(false)
               void setFlag(0)
             }}
-            className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-line px-2 py-3 text-xs font-medium text-muted transition hover:bg-surface-2"
+            className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-[18px] px-1 py-2.5 text-xs font-medium text-muted ring-1 ring-inset ring-line transition hover:bg-surface-2"
           >
             <X className="size-6" />
             Снять
@@ -514,11 +584,11 @@ export default function StudyPage({ mix = false }: { mix?: boolean }) {
   )
 }
 
-function CountBadge({ v, cls, active, label }: { v: number; cls: string; active: boolean; label: string }) {
+function Result({ label, value }: { label: string; value: number }) {
   return (
-    <span title={label} className={cn('relative px-1', v ? cls : 'text-muted/40')}>
-      {v}
-      {active && <span className="absolute -bottom-1.5 left-0 right-0 h-0.5 rounded-full bg-current" />}
-    </span>
+    <div className="flex flex-col-reverse rounded-[18px] bg-surface px-2 py-3 ring-1 ring-line/70">
+      <dt className="text-sm text-muted">{label}</dt>
+      <dd className="text-[28px] font-bold leading-9 tabular-nums">{value}</dd>
+    </div>
   )
 }

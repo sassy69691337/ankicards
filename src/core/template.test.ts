@@ -67,6 +67,10 @@ describe('генерация карточек', () => {
   it('обратная по желанию', () => {
     expect(cardOrdsForNote(optional, ['a', 'b', ''])).toEqual([0])
     expect(cardOrdsForNote(optional, ['a', 'b', 'y'])).toEqual([0, 1])
+    // «Слово»: старые заметки без поля-флага и пустой флаг — две карточки, флаг — одна
+    expect(cardOrdsForNote(word, ['a', 'b', ''])).toEqual([0, 1])
+    expect(cardOrdsForNote(word, ['a', 'b', '', ''])).toEqual([0, 1])
+    expect(cardOrdsForNote(word, ['a', 'b', '', 'y'])).toEqual([0])
   })
   it('пропуски', () => {
     expect(cardOrdsForNote(cloze, ['{{c1::a}} {{c3::b}} {{c1::c}}', ''])).toEqual([0, 2])

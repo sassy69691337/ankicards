@@ -13,7 +13,7 @@ import type { ApkgData } from '../../io/apkgRead'
 import { importApkg, summarize, type ApkgOptions } from '../../io/importApkg'
 import { fileExt, formatBytes } from '../../io/files'
 import { PageBody, PageHeader } from '../../ui/PageHeader'
-import { ListGroup } from '../../ui/List'
+import { ListGroup, Notice, ProgressBar } from '../../ui/List'
 import { Field, FormRow, Input, Segmented, Select, Switch } from '../../ui/forms'
 import { Button } from '../../ui/Button'
 import { cn } from '../../ui/cn'
@@ -72,11 +72,10 @@ export default function ImportPage() {
         {step.kind === 'reading' && <Working title={`Читаю ${step.name}…`} />}
         {step.kind === 'error' && (
           <div className="space-y-4">
-            <div className="flex gap-3 rounded-2xl bg-red-500/10 p-4 text-red-700 dark:text-red-300">
-              <CircleAlert className="size-5 shrink-0" />
-              <p className="text-sm">{step.message}</p>
-            </div>
-            <Button variant="secondary" className="w-full" onClick={reset}>
+            <Notice tone="danger" icon={<CircleAlert />} title="Файл не импортирован">
+              {step.message}
+            </Notice>
+            <Button variant="secondary" size="lg" className="w-full" onClick={reset}>
               Выбрать другой файл
             </Button>
           </div>
@@ -153,15 +152,15 @@ function PickFile({ onFile }: { onFile: (f: File) => void }) {
           if (f) onFile(f)
         }}
         className={cn(
-          'flex w-full flex-col items-center rounded-3xl border-2 border-dashed px-6 py-10 text-center transition',
-          drag ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent/60',
+          'flex w-full flex-col items-center rounded-[28px] border-2 border-dashed px-6 py-10 text-center transition',
+          drag ? 'border-accent-text bg-accent-soft' : 'border-input/50 bg-surface hover:border-accent-text',
         )}
       >
-        <span className="mb-4 grid size-16 place-items-center rounded-2xl bg-accent-soft text-accent">
+        <span className="mb-4 grid size-16 place-items-center rounded-[20px] bg-accent-soft text-accent-text">
           <FileUp className="size-8" />
         </span>
-        <span className="text-lg font-semibold">Выберите файл</span>
-        <span className="mt-1 text-sm text-muted">CSV, TXT или колода Anki (.apkg)</span>
+        <span className="text-[20px] font-semibold leading-[26px]">Выберите файл</span>
+        <span className="mt-1 text-[15px] text-muted">CSV, TXT или колода Anki (.apkg)</span>
       </button>
       <input
         ref={input}
@@ -190,10 +189,10 @@ function PickFile({ onFile }: { onFile: (f: File) => void }) {
 function Hint({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
     <div className="flex gap-3 px-4 py-3.5">
-      <span className="mt-0.5 text-accent [&_svg]:size-5">{icon}</span>
+      <span className="mt-0.5 text-accent-text [&_svg]:size-5">{icon}</span>
       <div>
-        <div className="text-[15px] font-medium">{title}</div>
-        <p className="mt-0.5 text-sm text-muted">{children}</p>
+        <div className="text-base font-medium">{title}</div>
+        <p className="mt-0.5 text-[15px] leading-[22px] text-muted">{children}</p>
       </div>
     </div>
   )
@@ -201,16 +200,10 @@ function Hint({ icon, title, children }: { icon: ReactNode; title: string; child
 
 function Working({ title, value, hint }: { title: string; value?: number; hint?: string }) {
   return (
-    <div className="rounded-3xl border border-line bg-surface p-6 text-center">
+    <div className="rounded-[24px] bg-surface p-6 text-center ring-1 ring-line/70" aria-busy="true">
       <p className="font-semibold">{title}</p>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
-        {value === undefined ? (
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-accent" />
-        ) : (
-          <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.round(value * 100)}%` }} />
-        )}
-      </div>
-      {hint && <p className="mt-3 text-xs text-muted">{hint}</p>}
+      <ProgressBar value={value} label={title} className="mt-4" />
+      {hint && <p className="mt-3 text-sm text-muted">{hint}</p>}
     </div>
   )
 }
@@ -220,11 +213,11 @@ function Done({ report, onMore }: { report: ImportReport; onMore: () => void }) 
   const r = report
   return (
     <div className="space-y-5">
-      <div className="flex flex-col items-center rounded-3xl border border-line bg-surface p-6 text-center">
-        <span className="mb-3 grid size-16 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+      <div className="flex flex-col items-center rounded-[24px] bg-surface p-6 text-center ring-1 ring-line/70">
+        <span className="mb-3 grid size-16 place-items-center rounded-full bg-success-soft text-success">
           <CircleCheck className="size-9" />
         </span>
-        <h2 className="text-xl font-bold">Импорт завершён</h2>
+        <h2 className="text-[24px] font-bold leading-[30px]">{r.errors.length ? 'Импорт завершён с ошибками' : 'Импорт завершён'}</h2>
         <p className="mt-1 text-muted">
           Добавлено {r.added} {plural(r.added, ['заметка', 'заметки', 'заметок'])} ({r.cards} {cardsWord(r.cards)})
         </p>
@@ -250,14 +243,14 @@ function Done({ report, onMore }: { report: ImportReport; onMore: () => void }) 
         )}
         {r.errors.length > 0 && (
           <FormRow label="С ошибками">
-            <span className="tabular-nums text-red-600 dark:text-red-400">{r.errors.length}</span>
+            <span className="font-semibold tabular-nums text-danger">{r.errors.length}</span>
           </FormRow>
         )}
       </ListGroup>
       {r.errors.length > 0 && (
         <ListGroup title="Не импортированы" footer={r.errors.length > 20 ? `и ещё ${r.errors.length - 20}` : undefined}>
           {r.errors.slice(0, 20).map((e, i) => (
-            <div key={i} className="px-4 py-2.5 text-sm">
+            <div key={i} className="px-4 py-2.5 text-[15px]">
               {e.line > 0 && <span className="font-medium">Строка {e.line}: </span>}
               <span className="text-muted">{e.reason}</span>
             </div>
@@ -274,7 +267,7 @@ function Done({ report, onMore }: { report: ImportReport; onMore: () => void }) 
             К колодам
           </Button>
         )}
-        <Button variant="ghost" className="w-full" onClick={onMore}>
+        <Button variant="ghost" size="lg" className="w-full" onClick={onMore}>
           Импортировать ещё файл
         </Button>
       </div>
@@ -364,17 +357,17 @@ function TextImport({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-surface p-4">
+      <div className="rounded-[24px] bg-surface p-4 ring-1 ring-line/70">
         <div className="flex items-center gap-3">
-          <FileSpreadsheet className="size-8 shrink-0 text-accent" />
+          <FileSpreadsheet className="size-8 shrink-0 text-accent-text" />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{file.name}</div>
+            <div className="break-all font-medium">{file.name}</div>
             <div className="text-xs text-muted">
               {formatBytes(file.size)} · {parsed.encoding} · {parsed.rows.length} {plural(parsed.rows.length, ['строка', 'строки', 'строк'])}
             </div>
           </div>
         </div>
-        <div className="mt-3 overflow-x-auto rounded-xl border border-line">
+        <div className="mt-3 overflow-x-auto rounded-[14px] border border-line">
           <table className="w-full text-left text-xs">
             <thead className="bg-surface-2 text-muted">
               <tr>
@@ -402,7 +395,7 @@ function TextImport({
 
       <ListGroup title="Файл">
         <FormRow label="Разделитель">
-          <Select value={parsed.delimiter} onChange={(e) => changeDelimiter(e.target.value)} className="w-48">
+          <Select value={parsed.delimiter} onChange={(e) => changeDelimiter(e.target.value)} className="w-full max-w-52">
             {SEPARATOR_LABELS.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
@@ -447,10 +440,10 @@ function TextImport({
 
       <ListGroup title="Какая колонка в какое поле">
         {nt.fields.map((f, i) => (
-          <FormRow key={f + i} label={f}>
+          <FormRow key={f + i} label={f} stacked>
             <Select
+              aria-label={`Колонка для поля «${f}»`}
               value={plan.fieldColumns[i] ?? -1}
-              className="w-52"
               onChange={(e) => {
                 const v = Number(e.target.value)
                 const next = [...plan.fieldColumns]
@@ -462,8 +455,8 @@ function TextImport({
             </Select>
           </FormRow>
         ))}
-        <FormRow label="Метки">
-          <Select value={plan.tagsColumn ?? -1} className="w-52" onChange={(e) => set({ tagsColumn: Number(e.target.value) < 0 ? null : Number(e.target.value) })}>
+        <FormRow label="Метки" stacked>
+          <Select aria-label="Колонка для меток" value={plan.tagsColumn ?? -1} onChange={(e) => set({ tagsColumn: Number(e.target.value) < 0 ? null : Number(e.target.value) })}>
             {columnOptions}
           </Select>
         </FormRow>
@@ -489,7 +482,7 @@ function TextImport({
         <Button size="lg" className="w-full" disabled={!mappedAny || count <= 0 || (newDeck !== null && !newDeck.trim())} onClick={() => onRun(parsed, { ...plan, extraTags: parseTags(extraTags) }, newDeck)}>
           Импортировать {count} {plural(count, ['строку', 'строки', 'строк'])}
         </Button>
-        <Button variant="ghost" className="w-full" onClick={onCancel}>
+        <Button variant="ghost" size="lg" className="w-full" onClick={onCancel}>
           Отмена
         </Button>
       </div>
@@ -505,11 +498,11 @@ function ApkgImport({ file, data, onCancel, onRun }: { file: File; data: ApkgDat
   const [dupMode, setDupMode] = useState<ApkgOptions['dupMode']>('skip')
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-line bg-surface p-4">
+      <div className="rounded-[24px] bg-surface p-4 ring-1 ring-line/70">
         <div className="flex items-center gap-3">
-          <Package className="size-8 shrink-0 text-accent" />
+          <Package className="size-8 shrink-0 text-accent-text" />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{file.name}</div>
+            <div className="break-all font-medium">{file.name}</div>
             <div className="text-xs text-muted">{formatBytes(file.size)}</div>
           </div>
         </div>
@@ -554,7 +547,7 @@ function ApkgImport({ file, data, onCancel, onRun }: { file: File; data: ApkgDat
         <Button size="lg" className="w-full" onClick={() => onRun({ withProgress, dupMode })}>
           Импортировать
         </Button>
-        <Button variant="ghost" className="w-full" onClick={onCancel}>
+        <Button variant="ghost" size="lg" className="w-full" onClick={onCancel}>
           Отмена
         </Button>
       </div>
@@ -564,7 +557,7 @@ function ApkgImport({ file, data, onCancel, onRun }: { file: File; data: ApkgDat
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
-    <div className="rounded-xl bg-surface-2/70 py-2.5">
+    <div className="rounded-[16px] bg-surface-2/70 py-2.5">
       <div className="text-xl font-bold tabular-nums">{value}</div>
       <div className="text-xs text-muted">{label}</div>
     </div>
