@@ -108,7 +108,9 @@ export default function DeckOptionsPage() {
 
         <ListGroup title="Новые карточки" footer="Шаги: 30s, 1m, 10m, 1h, 1d — через пробел.">
           <FormRow label="Шаги обучения">
-            <Input value={learn} onChange={(e) => setLearn(e.target.value)} className={cn('w-32 py-2 text-right', !learnOk && 'border-red-500')} />
+            <div className="w-32 shrink-0">
+              <Input value={learn} onChange={(e) => setLearn(e.target.value)} className={cn('py-2 text-right', !learnOk && 'border-red-500')} />
+            </div>
           </FormRow>
           <FormRow label="Интервал выпуска" hint="после последнего шага">
             <NumberInput value={o.graduatingIvl} onChange={(v) => set({ graduatingIvl: Math.round(v) })} min={1} suffix="д" />
@@ -123,7 +125,9 @@ export default function DeckOptionsPage() {
 
         <ListGroup title="Забытые карточки">
           <FormRow label="Шаги переобучения">
-            <Input value={relearn} onChange={(e) => setRelearn(e.target.value)} className={cn('w-32 py-2 text-right', !relearnOk && 'border-red-500')} />
+            <div className="w-32 shrink-0">
+              <Input value={relearn} onChange={(e) => setRelearn(e.target.value)} className={cn('py-2 text-right', !relearnOk && 'border-red-500')} />
+            </div>
           </FormRow>
           <FormRow label="Новый интервал" hint="доля от прежнего">
             <NumberInput value={Math.round(o.lapseMult * 100)} onChange={(v) => set({ lapseMult: v / 100 })} max={100} suffix="%" />

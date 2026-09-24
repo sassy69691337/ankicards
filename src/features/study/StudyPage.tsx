@@ -7,18 +7,17 @@ import {
   applyUndo,
   buryCards,
   deleteNote,
+  deckSource,
   loadCardView,
-  nextLearningDue,
-  pickNextCard,
+  mixedSource,
   setCardFlag,
   studyContext,
-  studyCounts,
   suspendCards,
   toggleMark,
   unburyIfNeeded,
   type CardViewData,
   type Counts,
-  type StudyCtx,
+  type StudySource,
   type UndoEntry,
 } from '../../db/collection'
 import { Queue, type Card } from '../../db/types'
@@ -76,7 +75,7 @@ function ttsFor(view: CardViewData, side: 'q' | 'a', manual = false): { text: st
   return text ? { text, lang: s.lang } : null
 }
 
-export default function StudyPage() {
+export default function StudyPage({ mix = false }: { mix?: boolean }) {
   const deckId = Number(useParams().id)
   const nav = useNavigate()
   const dark = useIsDark()
@@ -87,14 +86,14 @@ export default function StudyPage() {
   const [flagOpen, setFlagOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [session, setSession] = useState({ count: 0, started: Date.now() })
-  const ctxRef = useRef<StudyCtx | null>(null)
+  const srcRef = useRef<StudySource | null>(null)
   const undoStack = useRef<UndoEntry[]>([])
   const learnAhead = useRef(false)
   const shownAt = useRef(0)
   const rootRef = useRef<ShadowRoot | null>(null)
   const busy = useRef(false)
 
-  const exit = useCallback(() => nav(`/deck/${deckId}`), [nav, deckId])
+  const exit = useCallback(() => nav(mix ? '/' : `/deck/${deckId}`), [nav, deckId, mix])
 
   const autoplay = useCallback((view: CardViewData, html: string, side: 'q' | 'a', qHtml = '') => {
     stopAudio()
@@ -121,9 +120,8 @@ export default function StudyPage() {
 
   const showCard = useCallback(
     async (card: Card): Promise<boolean> => {
-      const ctx = ctxRef.current
-      if (!ctx) return false
-      const view = await loadCardView(card, ctx.deck)
+      if (!srcRef.current) return false
+      const view = await loadCardView(card)
       if (!view) return false
       const { q } = renderCard(view.nt, view.note, card.ord, view.deck.name)
       setState({ status: 'card', view, q, a: '', flipped: false, ivls: previewIntervals(card, view.opts, schedTime()) })
@@ -135,15 +133,15 @@ export default function StudyPage() {
   )
 
   const loadNext = useCallback(async () => {
-    const ctx = ctxRef.current
-    if (!ctx) return
+    const src = srcRef.current
+    if (!src) return
     for (let attempt = 0; attempt < 20; attempt++) {
       const t = schedTime()
-      const card = await pickNextCard(ctx, t, learnAhead.current)
-      setCounts(await studyCounts(ctx, t))
+      const card = await src.next(t, learnAhead.current)
+      setCounts(await src.counts(t))
       if (!card) {
         stopAudio()
-        setState({ status: 'done', nextDue: await nextLearningDue(ctx, t) })
+        setState({ status: 'done', nextDue: await src.nextLearnDue(t) })
         return
       }
       if (await showCard(card)) return
@@ -155,13 +153,14 @@ export default function StudyPage() {
     let cancelled = false
     void (async () => {
       await unburyIfNeeded()
-      const ctx = await studyContext(deckId)
+      const ctx = mix ? null : await studyContext(deckId)
+      const src = mix ? await mixedSource() : ctx ? deckSource(ctx) : null
       if (cancelled) return
-      if (!ctx) {
+      if (!src) {
         nav('/', { replace: true })
         return
       }
-      ctxRef.current = ctx
+      srcRef.current = src
       await loadNext()
     })()
     return () => {
@@ -170,7 +169,7 @@ export default function StudyPage() {
       stopSpeech()
       void requestSync()
     }
-  }, [deckId, loadNext, nav])
+  }, [deckId, mix, loadNext, nav])
 
   // Когда подойдёт время карточки на изучении — показать её
   useEffect(() => {
@@ -224,7 +223,7 @@ export default function StudyPage() {
       await applyUndo(e)
       if (e.revlogId) setSession((s) => ({ ...s, count: Math.max(0, s.count - 1) }))
       const card = e.showCardId ? await db.cards.get(e.showCardId) : undefined
-      if (ctxRef.current) setCounts(await studyCounts(ctxRef.current))
+      if (srcRef.current) setCounts(await srcRef.current.counts())
       if (!(card && card.queue >= 0 && (await showCard(card)))) await loadNext()
       toast(`Отменено: ${e.label}`)
     } finally {
@@ -427,7 +426,7 @@ export default function StudyPage() {
                   </Button>
                 )}
                 <Button variant="secondary" onClick={exit}>
-                  К колоде
+                  {mix ? 'К колодам' : 'К колоде'}
                 </Button>
               </div>
             </div>

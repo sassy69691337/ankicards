@@ -38,7 +38,7 @@ export function AutoTextarea({
 
 export function Select({ className, children, ...props }: ComponentProps<'select'>) {
   return (
-    <div className={cn('relative', className)}>
+    <div className={cn('relative shrink-0', className)}>
       <select className={cn(inputCls, 'appearance-none pr-10')} {...props}>
         {children}
       </select>

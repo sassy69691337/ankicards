@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CircleAlert, CircleCheck, FileSpreadsheet, FileUp, Package } from 'lucide-react'
 import { db } from '../../db/db'
-import { createDeck } from '../../db/collection'
+import { createUniqueDeck, deckNameFromFile } from '../../db/collection'
 import type { NoteType } from '../../db/types'
 import { cardsWord, errMsg, plural } from '../../core/format'
 import { parseTags } from '../../core/text'
@@ -16,8 +16,6 @@ import { PageBody, PageHeader } from '../../ui/PageHeader'
 import { ListGroup } from '../../ui/List'
 import { Field, FormRow, Input, Segmented, Select, Switch } from '../../ui/forms'
 import { Button } from '../../ui/Button'
-import { promptDialog } from '../../ui/dialogs'
-import { toast } from '../../ui/toast'
 import { cn } from '../../ui/cn'
 import { DeckOptionsList } from '../editor/DeckSelect'
 import { requestSync } from '../../sync/cloud'
@@ -32,6 +30,7 @@ type Step =
   | { kind: 'error'; message: string }
 
 const TEXT_EXT = ['csv', 'txt', 'tsv', 'tab']
+const NEW_DECK = -2
 const APKG_EXT = ['apkg', 'colpkg']
 
 export default function ImportPage() {
@@ -88,9 +87,19 @@ export default function ImportPage() {
             initial={step.parsed}
             targetDeck={targetDeck}
             onCancel={reset}
-            onRun={async (parsed, plan) => {
+            onRun={async (parsed, plan, newDeck) => {
+              let created: number | null = null
               try {
+                if (newDeck !== null) {
+                  created = await createUniqueDeck(newDeck)
+                  plan = { ...plan, deckId: created }
+                }
                 const report = await importTextRows(parsed, plan, progress)
+                // Ничего не добавилось (всё — повторы) — пустую колоду не оставляем
+                if (created && (await db.cards.where('deckId').equals(created).count()) === 0) {
+                  await db.decks.delete(created)
+                  report.deckIds = report.deckIds.filter((d) => d !== created)
+                }
                 setStep({ kind: 'done', report })
                 void requestSync()
               } catch (e) {
@@ -106,7 +115,7 @@ export default function ImportPage() {
             onCancel={reset}
             onRun={async (opts) => {
               try {
-                const report = await importApkg(step.data, opts, progress)
+                const report = await importApkg(step.data, { ...opts, defaultDeckName: deckNameFromFile(step.file.name) }, progress)
                 setStep({ kind: 'done', report })
                 void requestSync()
               } catch (e) {
@@ -286,7 +295,7 @@ function TextImport({
   initial: ParsedText
   targetDeck: number
   onCancel: () => void
-  onRun: (parsed: ParsedText, plan: TextPlan) => void
+  onRun: (parsed: ParsedText, plan: TextPlan, newDeck: string | null) => void
 }) {
   const noteTypes = useLiveQuery(() => db.noteTypes.toArray(), [])
   const decks = useLiveQuery(() => db.decks.toArray(), [])
@@ -294,6 +303,9 @@ function TextImport({
   const [plan, setPlan] = useState<TextPlan | null>(null)
   const [extraTags, setExtraTags] = useState((initial.headers.tags ?? []).join(' '))
   const names = useMemo(() => columnNames(parsed), [parsed])
+  const suggestedName = initial.headers.deck || deckNameFromFile(file.name)
+  // По умолчанию — новая колода с именем файла (если импорт запущен не из конкретной колоды)
+  const [newDeck, setNewDeck] = useState<string | null>(targetDeck ? null : suggestedName)
 
   // Начальный план — когда загрузились типы и колоды
   if (!plan && noteTypes && decks) {
@@ -322,15 +334,13 @@ function TextImport({
       setPlan(suggestPlan(next, nt, plan.deckId, columnNames(next)))
     })
   }
-  const onDeck = async (v: number) => {
-    if (v !== -1) return set({ deckId: v })
-    const name = await promptDialog({ title: 'Новая колода', placeholder: 'Название', confirmText: 'Создать' })
-    if (!name?.trim()) return
-    try {
-      set({ deckId: await createDeck(name) })
-    } catch (e) {
-      toast(errMsg(e), 'error')
+  const onDeck = (v: number) => {
+    if (v === NEW_DECK) {
+      setNewDeck(newDeck ?? suggestedName)
+      return
     }
+    setNewDeck(null)
+    set({ deckId: v })
   }
 
   const colLabel = (i: number) => {
@@ -419,10 +429,19 @@ function TextImport({
           </Select>
         </Field>
         <Field label="Колода" htmlFor="imp-deck" hint={plan.deckColumn !== null ? 'Колода берётся из файла; эта — для строк без колоды' : undefined}>
-          <Select id="imp-deck" value={plan.deckId} onChange={(e) => void onDeck(Number(e.target.value))}>
+          <Select id="imp-deck" value={newDeck !== null ? NEW_DECK : plan.deckId} onChange={(e) => onDeck(Number(e.target.value))}>
+            <option value={NEW_DECK}>+ Новая колода</option>
             <DeckOptionsList decks={decks} />
-            <option value={-1}>+ Новая колода…</option>
           </Select>
+          {newDeck !== null && (
+            <Input
+              aria-label="Название новой колоды"
+              value={newDeck}
+              onChange={(e) => setNewDeck(e.target.value)}
+              placeholder="Название новой колоды"
+              className="mt-2"
+            />
+          )}
         </Field>
       </div>
 
@@ -467,7 +486,7 @@ function TextImport({
       </Field>
 
       <div className="space-y-2 pt-1">
-        <Button size="lg" className="w-full" disabled={!mappedAny || count <= 0} onClick={() => onRun(parsed, { ...plan, extraTags: parseTags(extraTags) })}>
+        <Button size="lg" className="w-full" disabled={!mappedAny || count <= 0 || (newDeck !== null && !newDeck.trim())} onClick={() => onRun(parsed, { ...plan, extraTags: parseTags(extraTags) }, newDeck)}>
           Импортировать {count} {plural(count, ['строку', 'строки', 'строк'])}
         </Button>
         <Button variant="ghost" className="w-full" onClick={onCancel}>
@@ -481,7 +500,7 @@ function TextImport({
 // ---------- APKG ----------
 
 function ApkgImport({ file, data, onCancel, onRun }: { file: File; data: ApkgData; onCancel: () => void; onRun: (o: ApkgOptions) => void }) {
-  const s = useMemo(() => summarize(data), [data])
+  const s = useMemo(() => summarize(data, deckNameFromFile(file.name)), [data, file.name])
   const [withProgress, setWithProgress] = useState(s.hasProgress)
   const [dupMode, setDupMode] = useState<ApkgOptions['dupMode']>('skip')
   return (

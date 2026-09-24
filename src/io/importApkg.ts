@@ -15,6 +15,8 @@ export interface ApkgOptions {
   withProgress: boolean
   /** Что делать с заметками, которые уже есть (по GUID) */
   dupMode: 'skip' | 'update'
+  /** Куда класть карточки из колоды Anki «Default» (обычно — имя файла) */
+  defaultDeckName?: string
 }
 
 export interface ApkgSummary {
@@ -28,11 +30,11 @@ export interface ApkgSummary {
 const CHUNK = 1000
 const MEDIA_BATCH = 40
 
-const ankiDeckName = (name: string) => (name === 'Default' ? DEFAULT_DECK_NAME : name)
+const ankiDeckName = (name: string | undefined, fallback = DEFAULT_DECK_NAME) => (!name || name === 'Default' ? fallback : name)
 
-export function summarize(data: ApkgData): ApkgSummary {
+export function summarize(data: ApkgData, defaultDeckName?: string): ApkgSummary {
   const used = new Set(data.cards.map((c) => c.odid || c.did))
-  const decks = [...used].map((id) => ankiDeckName(data.decks.get(id)?.name ?? 'Импорт')).sort((a, b) => a.localeCompare(b, 'ru'))
+  const decks = [...used].map((id) => ankiDeckName(data.decks.get(id)?.name, defaultDeckName)).sort((a, b) => a.localeCompare(b, 'ru'))
   return {
     notes: data.notes.length,
     cards: data.cards.length,
@@ -144,7 +146,7 @@ export async function importApkg(data: ApkgData, opts: ApkgOptions, progress?: P
   const deckMap = new Map<number, number>()
   for (const did of new Set(data.cards.map((c) => c.odid || c.did))) {
     const ad = data.decks.get(did)
-    const name = ankiDeckName(ad?.name ?? 'Импорт')
+    const name = ankiDeckName(ad?.name, opts.defaultDeckName)
     const existed = await db.decks.where('name').equals(name).first()
     const id = existed?.id ?? (await createDeck(name))
     if (!existed && opts.withProgress) await db.decks.update(id, { optionsId: await presetFor(ad?.conf) })

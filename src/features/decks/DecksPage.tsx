@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronRight, DatabaseBackup, FileUp, FolderPlus, Layers, Plus } from 'lucide-react'
+import { ChevronRight, DatabaseBackup, FileUp, FolderPlus, Layers, Plus, Shuffle } from 'lucide-react'
 import { getConfig } from '../../db/db'
 import { createDeck, deckTree, todayStats, type DeckNode } from '../../db/collection'
 import { cardsWord, errMsg } from '../../core/format'
@@ -105,6 +105,16 @@ export default function DecksPage() {
           <p className="mt-3 text-sm text-white/75">
             Изучено: {stats?.count ?? 0} · {Math.round((stats?.ms ?? 0) / 60000)} мин
           </p>
+          {due > 0 && (
+            <button
+              type="button"
+              onClick={() => nav('/study/mix')}
+              className="relative mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-[15px] font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50 active:scale-[0.98]"
+            >
+              <Shuffle className="size-5" />
+              Учить всё вперемешку
+            </button>
+          )}
         </section>
 
         {needBackup && (

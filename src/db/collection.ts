@@ -50,6 +50,19 @@ export async function createDeck(name: string): Promise<number> {
   })
 }
 
+/** Создаёт новую колоду; если имя занято — добавляет «(2)», «(3)»… */
+export async function createUniqueDeck(name: string): Promise<number> {
+  const base = normalizeDeckName(name) || 'Импорт'
+  let candidate = base
+  for (let i = 2; await db.decks.where('name').equals(candidate).first(); i++) candidate = `${base} (${i})`
+  return createDeck(candidate)
+}
+
+/** Имя колоды из имени файла: «italian_words.txt» -> «italian words» */
+export function deckNameFromFile(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Импорт'
+}
+
 export async function renameDeck(deck: Deck, newName: string): Promise<void> {
   const clean = normalizeDeckName(newName)
   if (!clean) throw new Error('Введите название колоды')
@@ -256,6 +269,98 @@ export async function nextLearningDue(ctx: StudyCtx, t = schedTime()): Promise<n
   return c ? c.due : null
 }
 
+/** Откуда берутся карточки на экране учёбы: одна колода или все вперемешку */
+export interface StudySource {
+  counts(t?: SchedTime): Promise<Counts>
+  next(t: SchedTime, learnAhead: boolean): Promise<Card | null>
+  nextLearnDue(t?: SchedTime): Promise<number | null>
+}
+
+export function deckSource(ctx: StudyCtx): StudySource {
+  return {
+    counts: (t) => studyCounts(ctx, t),
+    next: (t, ahead) => pickNextCard(ctx, t, ahead),
+    nextLearnDue: (t) => nextLearningDue(ctx, t),
+  }
+}
+
+function subtreeOf(node: DeckNode, out: number[] = []): number[] {
+  out.push(node.deck.id)
+  node.children.forEach((c) => subtreeOf(c, out))
+  return out
+}
+
+async function takeDue(ids: number[], queue: Queue, upper: number, limit: number): Promise<Card[]> {
+  if (limit <= 0) return []
+  const all: Card[] = []
+  for (const id of ids) {
+    const range = db.cards.where(idx).between([id, queue, Dexie.minKey], [id, queue, upper], true, true)
+    // IndexedDB принимает лимит не больше 2^32-1
+    all.push(...(await (limit < 1e9 ? range.limit(limit) : range).toArray()))
+  }
+  return all.sort((a, b) => a.due - b.due).slice(0, limit)
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = arr[i]
+    arr[i] = arr[j]
+    arr[j] = tmp
+  }
+  return arr
+}
+
+/** Карточки на сегодня из всех колод (с учётом лимитов каждой колоды), в случайном порядке */
+export async function buildMixedQueue(t: SchedTime): Promise<number[]> {
+  const ids: number[] = []
+  for (const top of await deckTree()) {
+    const deckIds = subtreeOf(top)
+    const dayLearn = await takeDue(deckIds, Queue.DayLearn, t.today, Number.MAX_SAFE_INTEGER)
+    const reviews = await takeDue(deckIds, Queue.Review, t.today, top.counts.review)
+    const fresh = await takeDue(deckIds, Queue.New, Number.MAX_SAFE_INTEGER, top.counts.new)
+    ids.push(...[...dayLearn, ...reviews, ...fresh].map((c) => c.id))
+  }
+  return shuffle(ids)
+}
+
+const isDueToday = (c: Card, t: SchedTime) =>
+  c.queue === Queue.New || ((c.queue === Queue.Review || c.queue === Queue.DayLearn) && c.due <= t.today)
+
+export async function mixedSource(): Promise<StudySource> {
+  let queue: number[] = []
+  const allIds = async () => (await db.decks.toCollection().primaryKeys()) as number[]
+  return {
+    async counts() {
+      const tree = await deckTree()
+      const zero: Counts = { new: 0, learn: 0, review: 0 }
+      return tree.reduce((s, n) => ({ new: s.new + n.counts.new, learn: s.learn + n.counts.learn, review: s.review + n.counts.review }), zero)
+    },
+    async next(t, learnAhead) {
+      const ids = await allIds()
+      // Карточки на шагах обучения показываем вовремя, иначе собьются интервалы
+      const learnNow = await firstDue(ids, Queue.Learn, t.now)
+      if (learnNow) return learnNow
+      let rebuilt = false
+      for (;;) {
+        if (!queue.length) {
+          if (rebuilt) break
+          queue = await buildMixedQueue(t)
+          rebuilt = true
+          if (!queue.length) break
+        }
+        const card = await db.cards.get(queue.pop()!)
+        if (card && isDueToday(card, t)) return card
+      }
+      return (await firstDue(ids, Queue.Learn, learnAhead ? t.dayEnd : t.now + LEARN_AHEAD_MS, false)) ?? null
+    },
+    async nextLearnDue(t = schedTime()) {
+      const c = await firstDue(await allIds(), Queue.Learn, t.dayEnd, false)
+      return c ? c.due : null
+    },
+  }
+}
+
 export interface CardViewData {
   card: Card
   note: Note
@@ -265,14 +370,25 @@ export interface CardViewData {
   tts?: TtsSettings
 }
 
-export async function loadCardView(card: Card, root: Deck): Promise<CardViewData | null> {
+/** Озвучка колоды или ближайшей родительской колоды */
+async function ttsFor(deck: Deck): Promise<TtsSettings | undefined> {
+  if (deck.tts?.lang) return deck.tts
+  const parts = deck.name.split('::')
+  for (let i = parts.length - 1; i > 0; i--) {
+    const parent = await db.decks.where('name').equals(parts.slice(0, i).join('::')).first()
+    if (parent?.tts?.lang) return parent.tts
+  }
+  return undefined
+}
+
+export async function loadCardView(card: Card): Promise<CardViewData | null> {
   const [note, deck] = await Promise.all([db.notes.get(card.noteId), db.decks.get(card.deckId)])
   if (!note) return null
   const nt = await db.noteTypes.get(note.noteTypeId)
-  if (!nt) return null
-  const d = deck ?? root
-  const opts = await optionsFor(d)
-  return { card, note, nt, deck: d, opts, tts: d.tts?.lang ? d.tts : root.tts }
+  const d = deck ?? (await db.decks.toCollection().first())
+  if (!nt || !d) return null
+  const [opts, tts] = await Promise.all([optionsFor(d), ttsFor(d)])
+  return { card, note, nt, deck: d, opts, tts }
 }
 
 export interface UndoEntry {

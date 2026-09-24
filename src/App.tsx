@@ -27,6 +27,7 @@ export default function App() {
           <Route path="import" element={<ImportPage />} />
         </Route>
         <Route path="deck/:id/study" element={<StudyPage />} />
+        <Route path="study/mix" element={<StudyPage mix />} />
       </Routes>
       <DialogHost />
       <ToastHost />
